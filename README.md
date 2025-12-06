@@ -48,7 +48,7 @@ cd almostcraft
 ## 📚 Ressources d'apprentissage
 
 Ce projet suit les concepts de :
-- [LWJGL Game Development](https://lwjglgamedev.github.io/)
+- [LWJGL Game Development](http://lwjgl.org/)
 - Minecraft Wiki (techniques voxel)
 - Articles sur le greedy meshing et l'optimisation
 
