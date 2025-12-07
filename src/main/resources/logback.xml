@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- ==================== Appenders ==================== -->
+
+    <!-- Console output avec couleurs pour le développement -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan([%thread]) %magenta(%logger{36}) - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Fichier de log général -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/almostcraft.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <!-- Rotation quotidienne -->
+            <fileNamePattern>logs/almostcraft.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <!-- Garder 7 jours d'historique -->
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Fichier dédié aux performances (pour profiling) -->
+    <appender name="PERFORMANCE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/performance.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/performance.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>3</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Fichier pour les erreurs uniquement -->
+    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/errors.log</file>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/errors.%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n%ex{full}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ==================== Loggers par composant ==================== -->
+
+    <!-- Core Engine (cycle de vie, initialisation) -->
+    <logger name="org.almostcraft.core" level="INFO" />
+
+    <!-- Input system (peut être verbeux, mettre en TRACE si besoin) -->
+    <logger name="org.almostcraft.input" level="DEBUG" />
+
+    <!-- Rendering (important pour debug graphique) -->
+    <logger name="org.almostcraft.render" level="DEBUG" />
+
+    <!-- World generation (chunk loading, terrain gen) -->
+    <logger name="org.almostcraft.world" level="INFO" />
+
+    <!-- Physics (collisions, mouvement) -->
+    <logger name="org.almostcraft.physics" level="INFO" />
+
+    <!-- Assets (textures, shaders, models loading) -->
+    <logger name="org.almostcraft.assets" level="INFO" />
+
+    <!-- Performance monitoring (logger spécial) -->
+    <logger name="org.almostcraft.performance" level="DEBUG" additivity="false">
+        <appender-ref ref="PERFORMANCE" />
+        <appender-ref ref="CONSOLE" />
+    </logger>
+
+    <!-- Bibliothèques externes (moins verbeux) -->
+    <logger name="org.lwjgl" level="WARN" />
+
+    <!-- ==================== Configuration racine ==================== -->
+
+    <!--
+        Niveau par défaut : INFO
+        En développement, tu peux le passer à DEBUG
+        En production (release), le passer à WARN
+    -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="FILE" />
+        <appender-ref ref="ERROR_FILE" />
+    </root>
+
+</configuration>

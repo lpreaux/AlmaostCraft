@@ -1,5 +1,8 @@
 package org.almostcraft.input;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static org.lwjgl.glfw.GLFW.GLFW_CURSOR;
 import static org.lwjgl.glfw.GLFW.GLFW_CURSOR_DISABLED;
 import static org.lwjgl.glfw.GLFW.GLFW_CURSOR_HIDDEN;
@@ -44,6 +47,13 @@ import static org.lwjgl.glfw.GLFW.glfwSetScrollCallback;
  */
 public class InputManager {
 
+    // ==================== Logger ====================
+
+    /**
+     * Logger SLF4J pour cette classe.
+     */
+    private static final Logger logger = LoggerFactory.getLogger(InputManager.class);
+
     // ==================== Attributs ====================
 
     /**
@@ -73,11 +83,13 @@ public class InputManager {
      * @param windowHandle le handle de la fenêtre GLFW
      */
     public InputManager(long windowHandle) {
+        logger.debug("Creating InputManager for window handle: {}", windowHandle);
         this.windowHandle = windowHandle;
         this.keyboardInput = new KeyboardInput();
         this.mouseInput = new MouseInput();
 
         registerCallbacks();
+        logger.debug("InputManager created and callbacks registered");
     }
 
     // ==================== Initialisation ====================
@@ -95,6 +107,8 @@ public class InputManager {
      * </p>
      */
     private void registerCallbacks() {
+        logger.trace("Registering GLFW input callbacks");
+
         glfwSetKeyCallback(windowHandle,
                 (window, key, scancode, action, mods) -> keyboardInput.onKeyEvent(key, action));
 
@@ -254,6 +268,7 @@ public class InputManager {
      * </p>
      */
     public void hideCursor() {
+        logger.debug("Hiding cursor");
         glfwSetInputMode(windowHandle, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
     }
 
@@ -266,6 +281,7 @@ public class InputManager {
      * </p>
      */
     public void captureCursor() {
+        logger.debug("Capturing cursor (FPS mode)");
         glfwSetInputMode(windowHandle, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         mouseInput.resetDelta();
     }
@@ -277,6 +293,7 @@ public class InputManager {
      * </p>
      */
     public void releaseCursor() {
+        logger.debug("Releasing cursor");
         glfwSetInputMode(windowHandle, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
 
@@ -293,6 +310,7 @@ public class InputManager {
      * @see MouseInput#setSensitivity(float)
      */
     public void setMouseSensitivity(float sensitivity) {
+        logger.debug("Setting mouse sensitivity to {}", sensitivity);
         mouseInput.setSensitivity(sensitivity);
     }
 }

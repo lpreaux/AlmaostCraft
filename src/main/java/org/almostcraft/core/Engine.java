@@ -3,6 +3,8 @@ package org.almostcraft.core;
 import org.almostcraft.input.InputManager;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.opengl.GL;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,6 +44,13 @@ import static org.lwjgl.opengl.GL11.glClearColor;
  * @see InputManager
  */
 public class Engine {
+
+    // ==================== Logger ====================
+
+    /**
+     * Logger SLF4J pour cette classe.
+     */
+    private static final Logger logger = LoggerFactory.getLogger(Engine.class);
 
     // ==================== Constantes ====================
 
@@ -96,13 +105,13 @@ public class Engine {
     public void run() throws IOException {
         logStartup();
         init();
-        System.out.println("AlmostCraft has started");
+        logger.info("AlmostCraft has started successfully");
 
         loop();
 
-        System.out.println("AlmostCraft has finished. Cleaning up...");
+        logger.info("AlmostCraft shutting down...");
         cleanup();
-        System.out.println("AlmostCraft closed");
+        logger.info("AlmostCraft closed");
     }
 
     // ==================== Initialisation ====================
@@ -118,7 +127,7 @@ public class Engine {
     private void logStartup() throws IOException {
         Properties props = loadProperties();
         String version = props.getProperty("app.version", "unknown");
-        System.out.println("Starting AlmostCraft " + version);
+        logger.info("Starting AlmostCraft v{}", version);
     }
 
     /**
@@ -133,9 +142,11 @@ public class Engine {
 
         try (InputStream input = getClass().getResourceAsStream(CONFIG_FILE)) {
             if (input == null) {
+                logger.error("Configuration file not found: {}", CONFIG_FILE);
                 throw new IllegalStateException("Configuration file not found: " + CONFIG_FILE);
             }
             props.load(input);
+            logger.debug("Configuration loaded from {}", CONFIG_FILE);
         }
 
         return props;
@@ -156,9 +167,11 @@ public class Engine {
      * @throws IllegalStateException si l'initialisation de GLFW échoue
      */
     private void init() {
+        logger.info("Initializing engine systems...");
         initGLFW();
         initWindow();
         initInput();
+        logger.info("All engine systems initialized");
     }
 
     /**
@@ -167,13 +180,15 @@ public class Engine {
      * @throws IllegalStateException si GLFW ne peut pas être initialisé
      */
     private void initGLFW() {
-        // Configuration du callback d'erreur
+        logger.debug("Configuring GLFW error callback");
         GLFWErrorCallback.createPrint(System.err).set();
 
-        // Initialisation de GLFW
+        logger.info("Initializing GLFW");
         if (!glfwInit()) {
+            logger.error("Failed to initialize GLFW");
             throw new IllegalStateException("Unable to initialize GLFW");
         }
+        logger.debug("GLFW initialized successfully");
     }
 
     /**
@@ -188,18 +203,22 @@ public class Engine {
      * </p>
      */
     private void initWindow() {
+        logger.info("Creating window ({}x{})", DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
         window = new Window(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, WINDOW_TITLE);
         window.centerOnScreen();
         window.makeContextCurrent();
         window.enableVsync();
         window.show();
+        logger.debug("Window created with handle: {}", window.getHandle());
     }
 
     /**
      * Initialise le gestionnaire d'entrées.
      */
     private void initInput() {
+        logger.debug("Initializing input manager");
         inputManager = new InputManager(window.getHandle());
+        logger.debug("Input manager initialized");
     }
 
     // ==================== Boucle de jeu ====================
@@ -219,11 +238,13 @@ public class Engine {
      * </p>
      */
     private void loop() {
-        // Création des capacités OpenGL
+        logger.info("Creating OpenGL capabilities");
         GL.createCapabilities();
 
         // Couleur de fond par défaut (rouge)
         glClearColor(1.0f, 0.0f, 0.0f, 0.0f);
+
+        logger.info("Entering game loop");
 
         // Boucle principale
         while (!window.shouldClose()) {
@@ -242,6 +263,8 @@ public class Engine {
             // Affichage
             window.swapBuffers();
         }
+
+        logger.info("Game loop ended");
     }
 
     /**
@@ -258,6 +281,7 @@ public class Engine {
     private void handleInput() {
         // ESC pour quitter
         if (inputManager.isKeyDown(GLFW_KEY_ESCAPE)) {
+            logger.debug("ESC key pressed, closing window");
             glfwSetWindowShouldClose(window.getHandle(), true);
         }
 
@@ -314,16 +338,18 @@ public class Engine {
      * </p>
      */
     private void cleanup() {
-        // Destruction de la fenêtre
+        logger.debug("Destroying window");
         window.destroy();
 
-        // Terminaison de GLFW
+        logger.debug("Terminating GLFW");
         glfwTerminate();
 
-        // Libération du callback d'erreur
+        logger.debug("Freeing GLFW error callback");
         GLFWErrorCallback errorCallback = glfwSetErrorCallback(null);
         if (errorCallback != null) {
             errorCallback.free();
         }
+
+        logger.debug("Cleanup complete");
     }
 }

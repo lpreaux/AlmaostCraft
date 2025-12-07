@@ -2,6 +2,8 @@ package org.almostcraft.core;
 
 import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.system.MemoryStack;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.IntBuffer;
 
@@ -60,6 +62,13 @@ import static org.lwjgl.system.MemoryUtil.NULL;
  * @version 1.0
  */
 public class Window {
+
+    // ==================== Logger ====================
+
+    /**
+     * Logger SLF4J pour cette classe.
+     */
+    private static final Logger logger = LoggerFactory.getLogger(Window.class);
 
     // ==================== Attributs ====================
 
@@ -120,6 +129,7 @@ public class Window {
      */
     private void validateDimensions(int width, int height) {
         if (width <= 0 || height <= 0) {
+            logger.error("Invalid window dimensions: {}x{}. Both must be greater than 0", width, height);
             throw new IllegalArgumentException(
                     String.format("Invalid window dimensions: %dx%d. Both width and height must be greater than 0.",
                             width, height)
@@ -135,6 +145,7 @@ public class Window {
      */
     private void validateTitle(String title) {
         if (title == null || title.isEmpty()) {
+            logger.error("Window title cannot be null or empty");
             throw new IllegalArgumentException("Window title cannot be null or empty");
         }
     }
@@ -156,19 +167,22 @@ public class Window {
      * @throws RuntimeException si la création de la fenêtre échoue
      */
     private void create() {
-        // Configuration des hints de fenêtre
+        logger.debug("Setting up window hints");
         glfwDefaultWindowHints();
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-        // Création de la fenêtre
+        logger.debug("Creating GLFW window: {}x{} - '{}'", width, height, title);
         handle = glfwCreateWindow(width, height, title, NULL, NULL);
         if (handle == NULL) {
+            logger.error("Failed to create GLFW window");
             throw new RuntimeException("Failed to create the GLFW window");
         }
+        logger.debug("GLFW window created successfully (handle: {})", handle);
 
         // Callback de redimensionnement
         glfwSetFramebufferSizeCallback(handle, (window, w, h) -> {
+            logger.debug("Window resized: {}x{} -> {}x{}", this.width, this.height, w, h);
             this.width = w;
             this.height = h;
             glViewport(0, 0, w, h);
@@ -194,11 +208,11 @@ public class Window {
             GLFWVidMode vidmode = glfwGetVideoMode(glfwGetPrimaryMonitor());
 
             // Centrer la fenêtre
-            glfwSetWindowPos(
-                    handle,
-                    (vidmode.width() - pWidth.get(0)) / 2,
-                    (vidmode.height() - pHeight.get(0)) / 2
-            );
+            int x = (vidmode.width() - pWidth.get(0)) / 2;
+            int y = (vidmode.height() - pHeight.get(0)) / 2;
+
+            logger.debug("Centering window at position ({}, {})", x, y);
+            glfwSetWindowPos(handle, x, y);
         }
     }
 
@@ -209,6 +223,7 @@ public class Window {
      * </p>
      */
     public void makeContextCurrent() {
+        logger.debug("Making OpenGL context current");
         glfwMakeContextCurrent(handle);
     }
 
@@ -220,6 +235,7 @@ public class Window {
      * </p>
      */
     public void enableVsync() {
+        logger.debug("Enabling VSync");
         glfwSwapInterval(1);
     }
 
@@ -231,6 +247,7 @@ public class Window {
      * </p>
      */
     public void show() {
+        logger.debug("Showing window");
         glfwShowWindow(handle);
     }
 
@@ -271,6 +288,7 @@ public class Window {
      * </p>
      */
     public void destroy() {
+        logger.debug("Destroying window (handle: {})", handle);
         glfwFreeCallbacks(handle);
         glfwDestroyWindow(handle);
     }
