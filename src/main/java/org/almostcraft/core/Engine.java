@@ -1,6 +1,9 @@
 package org.almostcraft.core;
 
+import org.almostcraft.camera.Camera;
+import org.almostcraft.camera.CameraController;
 import org.almostcraft.input.InputManager;
+import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.opengl.GL;
 import org.slf4j.Logger;
@@ -10,13 +13,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
 
-import static org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE;
-import static org.lwjgl.glfw.GLFW.GLFW_KEY_SPACE;
-import static org.lwjgl.glfw.GLFW.glfwInit;
-import static org.lwjgl.glfw.GLFW.glfwPollEvents;
-import static org.lwjgl.glfw.GLFW.glfwSetErrorCallback;
-import static org.lwjgl.glfw.GLFW.glfwSetWindowShouldClose;
-import static org.lwjgl.glfw.GLFW.glfwTerminate;
+import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT;
 import static org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT;
 import static org.lwjgl.opengl.GL11.glClear;
@@ -70,6 +67,21 @@ public class Engine {
     private static final String WINDOW_TITLE = "AlmostCraft";
 
     /**
+     * Champ de vision (Field of View) de la caméra en degrés.
+     */
+    private static final float FOV = 70.0f;
+
+    /**
+     * Distance du plan de clipping proche.
+     */
+    private static final float Z_NEAR = 0.1f;
+
+    /**
+     * Distance du plan de clipping lointain.
+     */
+    private static final float Z_FAR = 1000.0f;
+
+    /**
      * Chemin vers le fichier de configuration.
      */
     private static final String CONFIG_FILE = "/application.properties";
@@ -85,6 +97,16 @@ public class Engine {
      * Gestionnaire des entrées utilisateur (clavier et souris).
      */
     private InputManager inputManager;
+
+    /**
+     * Caméra FPS du joueur.
+     */
+    private Camera camera;
+
+    /**
+     * Contrôleur de la caméra (gère les inputs).
+     */
+    private CameraController cameraController;
 
     // ==================== Point d'entrée ====================
 
@@ -171,6 +193,7 @@ public class Engine {
         initGLFW();
         initWindow();
         initInput();
+        initCamera();
         logger.info("All engine systems initialized");
     }
 
@@ -218,7 +241,33 @@ public class Engine {
     private void initInput() {
         logger.debug("Initializing input manager");
         inputManager = new InputManager(window.getHandle());
+
+        inputManager.captureCursor();
         logger.debug("Input manager initialized");
+    }
+
+    /**
+     * Initialise la caméra et son contrôleur.
+     * <p>
+     * La caméra est placée à une position initiale (0, 5, 10) pour voir la scène,
+     * et la matrice de projection est configurée avec le FOV et l'aspect ratio.
+     * </p>
+     */
+    private void initCamera() {
+        logger.debug("Initializing camera");
+        camera = new Camera();
+
+        // Configurer la matrice de projection
+        float aspectRatio = (float) window.getWidth() / window.getHeight();
+        camera.updateProjectionMatrix(FOV, aspectRatio, Z_NEAR, Z_FAR);
+
+        // Créer le contrôleur de caméra
+        cameraController = new CameraController(camera, inputManager);
+
+        // Optionnel : ajuster la sensibilité si besoin
+        // cameraController.setMouseSensitivity(0.15f);
+        // cameraController.setMoveSpeed(10.0f);
+        logger.debug("Camera initialized");
     }
 
     // ==================== Boucle de jeu ====================
@@ -229,9 +278,11 @@ public class Engine {
      * Crée le contexte OpenGL et exécute la boucle de jeu jusqu'à ce que
      * la fenêtre doive se fermer. Chaque itération :
      * <ol>
+     *   <li>Calcule le deltaTime</li>
      *   <li>Met à jour les entrées</li>
      *   <li>Traite les événements GLFW</li>
-     *   <li>Gère les inputs (temporaire : ESC pour quitter, SPACE pour changer la couleur)</li>
+     *   <li>Gère les inputs globaux (ESC pour quitter)</li>
+     *   <li>Met à jour la caméra</li>
      *   <li>Effectue le rendu</li>
      *   <li>Échange les buffers</li>
      * </ol>
@@ -241,13 +292,19 @@ public class Engine {
         logger.info("Creating OpenGL capabilities");
         GL.createCapabilities();
 
-        // Couleur de fond par défaut (rouge)
-        glClearColor(1.0f, 0.0f, 0.0f, 0.0f);
+        // Couleur de fond par défaut (bleu ciel)
+        glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
+
+        double lastTime = glfwGetTime();
 
         logger.info("Entering game loop");
 
         // Boucle principale
         while (!window.shouldClose()) {
+            double currentTime = glfwGetTime();
+            float deltaTime = (float) (currentTime - lastTime);
+            lastTime = currentTime;
+
             // Mise à jour des entrées
             inputManager.update();
 
@@ -256,6 +313,8 @@ public class Engine {
 
             // Gestion des inputs (temporaire - à déplacer dans une classe dédiée)
             handleInput();
+
+            cameraController.update(deltaTime);
 
             // Rendu
             render();
@@ -283,13 +342,6 @@ public class Engine {
         if (inputManager.isKeyDown(GLFW_KEY_ESCAPE)) {
             logger.debug("ESC key pressed, closing window");
             glfwSetWindowShouldClose(window.getHandle(), true);
-        }
-
-        // SPACE pour changer la couleur (test temporaire)
-        if (inputManager.isKeyDown(GLFW_KEY_SPACE)) {
-            glClearColor(0.0f, 1.0f, 0.0f, 0.0f);
-        } else {
-            glClearColor(1.0f, 0.0f, 0.0f, 0.0f);
         }
     }
 
@@ -353,3 +405,4 @@ public class Engine {
         logger.debug("Cleanup complete");
     }
 }
+

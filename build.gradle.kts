@@ -25,6 +25,7 @@ group = "org.example"
 version = "1.0-SNAPSHOT"
 
 val lwjglVersion = "3.3.6"
+val jomlVersion = "1.10.8"
 
 val lwjglNatives = Pair(
     System.getProperty("os.name")!!,
@@ -68,6 +69,7 @@ dependencies {
     runtimeOnly("org.lwjgl", "lwjgl-openal", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-opengl", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-stb", classifier = lwjglNatives)
+    implementation("org.joml", "joml", jomlVersion)
 
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.17")
