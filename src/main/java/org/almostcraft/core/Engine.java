@@ -1,22 +1,18 @@
 package org.almostcraft.core;
 
+import org.almostcraft.input.InputManager;
 import org.lwjgl.glfw.GLFWErrorCallback;
-import org.lwjgl.glfw.GLFWVidMode;
 import org.lwjgl.opengl.GL;
-import org.lwjgl.system.MemoryStack;
 
 import java.io.IOException;
-import java.nio.IntBuffer;
 import java.util.Properties;
 
-import static org.lwjgl.glfw.Callbacks.glfwFreeCallbacks;
 import static org.lwjgl.glfw.GLFW.*;
 import static org.lwjgl.opengl.GL11.*;
-import static org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT;
-import static org.lwjgl.system.MemoryStack.stackPush;
 
 public class Engine {
     private Window window;
+    private InputManager inputManager;
 
     public void run() throws IOException {
         Properties props = new Properties();
@@ -45,30 +41,29 @@ public class Engine {
         window.enableVsync();
         window.show();
 
-        // Setup a key callback. It will be called every time a key is pressed, repeated or released.
-        glfwSetKeyCallback(window.getHandle(), (window, key, scancode, action, mods) -> {
-            if (key == GLFW_KEY_ESCAPE && action == GLFW_RELEASE) {
-                glfwSetWindowShouldClose(window, true); // We will detect this in the rendering loop
-            }
-        });
+        inputManager = new InputManager(window.getHandle());
     }
 
     private void loop() {
         GL.createCapabilities();
-
-        // Set the clear color
         glClearColor(1.0f, 0.0f, 0.0f, 0.0f);
 
-        // Run the rendering loop until the user has attempted to close
-        // the window or has pressed the ESCAPE key.
         while (!window.shouldClose()) {
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // clear the framebuffer
+            inputManager.update();
 
-            window.swapBuffers(); // swap the color buffers
-
-            // Poll for window events. The key callback above will only be
-            // invoked during this call.
             glfwPollEvents();
+
+           if (inputManager.isKeyDown(GLFW_KEY_ESCAPE)) {
+               glfwSetWindowShouldClose(window.getHandle(), true);
+           }
+           if (inputManager.isKeyDown(GLFW_KEY_SPACE)) {
+               glClearColor(0.0f, 1.0f, 0.0f, 0.0f);
+           } else {
+               glClearColor(1.0f, 0.0f, 0.0f, 0.0f);
+           }
+           glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // clear the framebuffer
+
+            window.swapBuffers();
         }
     }
 
