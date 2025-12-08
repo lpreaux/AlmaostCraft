@@ -3,6 +3,8 @@ package org.almostcraft.core;
 import org.almostcraft.camera.Camera;
 import org.almostcraft.camera.CameraController;
 import org.almostcraft.input.InputManager;
+import org.almostcraft.world.block.BlockRegistry;
+import org.almostcraft.world.block.Blocks;
 import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.opengl.GL;
@@ -97,6 +99,8 @@ public class Engine {
      * Gestionnaire des entrées utilisateur (clavier et souris).
      */
     private InputManager inputManager;
+
+    private BlockRegistry blockRegistry;
 
     /**
      * Caméra FPS du joueur.
@@ -193,6 +197,7 @@ public class Engine {
         initGLFW();
         initWindow();
         initInput();
+        initBlockRegistry();
         initCamera();
         logger.info("All engine systems initialized");
     }
@@ -244,6 +249,23 @@ public class Engine {
 
         inputManager.captureCursor();
         logger.debug("Input manager initialized");
+    }
+
+    /**
+     * Initialise le registre de blocs et enregistre tous les blocs vanilla.
+     */
+    private void initBlockRegistry() {
+        logger.info("Initializing block registry");
+
+        blockRegistry = new BlockRegistry();
+
+        // Enregistrer tous les blocs de base
+        Blocks.register(blockRegistry);
+
+        // Figer le registre (plus d'enregistrements autorisés)
+        blockRegistry.freeze();
+
+        logger.info("Block registry initialized with {} blocks", blockRegistry.size());
     }
 
     /**
