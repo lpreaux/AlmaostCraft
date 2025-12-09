@@ -3,11 +3,14 @@ package org.almostcraft.core;
 import org.almostcraft.camera.Camera;
 import org.almostcraft.camera.CameraController;
 import org.almostcraft.input.InputManager;
+import org.almostcraft.render.ChunkRenderer;
+import org.almostcraft.render.Shader;
 import org.almostcraft.world.ChunkLoader;
 import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.Blocks;
 import org.almostcraft.world.generation.FlatTerrainGenerator;
+import org.almostcraft.world.generation.SimplexTerrainGenerator;
 import org.almostcraft.world.generation.TerrainGenerator;
 import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
@@ -20,10 +23,7 @@ import java.io.InputStream;
 import java.util.Properties;
 
 import static org.lwjgl.glfw.GLFW.*;
-import static org.lwjgl.opengl.GL11.GL_COLOR_BUFFER_BIT;
-import static org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT;
-import static org.lwjgl.opengl.GL11.glClear;
-import static org.lwjgl.opengl.GL11.glClearColor;
+import static org.lwjgl.opengl.GL11.*;
 
 /**
  * Moteur principal du jeu AlmostCraft.
@@ -60,12 +60,12 @@ public class Engine {
     /**
      * Largeur par défaut de la fenêtre en pixels.
      */
-    private static final int DEFAULT_WINDOW_WIDTH = 300;
+    private static final int DEFAULT_WINDOW_WIDTH = 1280;
 
     /**
      * Hauteur par défaut de la fenêtre en pixels.
      */
-    private static final int DEFAULT_WINDOW_HEIGHT = 300;
+    private static final int DEFAULT_WINDOW_HEIGHT = 720;
 
     /**
      * Titre de la fenêtre.
@@ -126,6 +126,15 @@ public class Engine {
      */
     private CameraController cameraController;
 
+    /**
+     * Shader pour le rendu des chunks.
+     */
+    private Shader shader;
+
+    /**
+     * Renderer pour les chunks.
+     */
+    private ChunkRenderer chunkRenderer;
 
     private long lastStatsLog = 0;
 
@@ -213,11 +222,14 @@ public class Engine {
         logger.info("Initializing engine systems...");
         initGLFW();
         initWindow();
+        initOpenGL();
         initInput();
         initBlockRegistry();
         initWorld();
         initCamera();
         initChunkLoader();
+        initShader();
+        initChunkRenderer();
         logger.info("All engine systems initialized");
     }
 
@@ -260,12 +272,28 @@ public class Engine {
     }
 
     /**
+     * Initialise OpenGL.
+     */
+    private void initOpenGL() {
+        logger.info("Creating OpenGL capabilities");
+        GL.createCapabilities();
+
+        // Configuration OpenGL
+        glClearColor(0.53f, 0.81f, 0.92f, 1.0f); // Bleu ciel
+        glEnable(GL_DEPTH_TEST);
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glFrontFace(GL_CCW);
+
+        logger.info("OpenGL initialized");
+    }
+
+    /**
      * Initialise le gestionnaire d'entrées.
      */
     private void initInput() {
         logger.debug("Initializing input manager");
         inputManager = new InputManager(window.getHandle());
-
         inputManager.captureCursor();
         logger.debug("Input manager initialized");
     }
@@ -295,8 +323,9 @@ public class Engine {
 
         // Créer le générateur de terrain
         TerrainGenerator generator = new FlatTerrainGenerator(blockRegistry);
+        // TerrainGenerator generator = new SimplexTerrainGenerator(blockRegistry);
 
-        // Créer le monde""
+        // Créer le monde
         world = new World(generator, blockRegistry);
 
         logger.info("World initialized with FlatTerrainGenerator");
@@ -305,13 +334,15 @@ public class Engine {
     /**
      * Initialise la caméra et son contrôleur.
      * <p>
-     * La caméra est placée à une position initiale (0, 5, 10) pour voir la scène,
+     * La caméra est placée à une position initiale (8, 70, 8) pour voir la scène,
      * et la matrice de projection est configurée avec le FOV et l'aspect ratio.
      * </p>
      */
     private void initCamera() {
         logger.debug("Initializing camera");
-        camera = new Camera();
+
+        // Position de spawn initiale
+        camera = new Camera(new Vector3f(8, 70, 8), 0, 0);
 
         // Configurer la matrice de projection
         float aspectRatio = (float) window.getWidth() / window.getHeight();
@@ -319,11 +350,9 @@ public class Engine {
 
         // Créer le contrôleur de caméra
         cameraController = new CameraController(camera, inputManager);
+        cameraController.setMoveSpeed(20.0f);
 
-        // Optionnel : ajuster la sensibilité si besoin
-        // cameraController.setMouseSensitivity(0.15f);
-        // cameraController.setMoveSpeed(10.0f);
-        logger.debug("Camera initialized");
+        logger.debug("Camera initialized at position {}", camera.getPosition());
     }
 
     /**
@@ -333,7 +362,7 @@ public class Engine {
         logger.info("Initializing chunk loader");
 
         // Créer le chunk loader avec render distance de 8
-        chunkLoader = new ChunkLoader(world, 12);
+        chunkLoader = new ChunkLoader(world, 8);
 
         // Charger les chunks initiaux autour de la position de spawn
         Vector3f spawnPosition = camera.getPosition();
@@ -343,13 +372,31 @@ public class Engine {
                 world.getLoadedChunkCount());
     }
 
+    /**
+     * Initialise le shader de rendu.
+     */
+    private void initShader() {
+        logger.info("Initializing shader");
+        shader = new Shader("shaders/cube.vert", "shaders/cube.frag");
+        logger.info("Shader initialized");
+    }
+
+    /**
+     * Initialise le renderer de chunks.
+     */
+    private void initChunkRenderer() {
+        logger.info("Initializing chunk renderer");
+        chunkRenderer = new ChunkRenderer(world, blockRegistry, shader);
+        logger.info("Chunk renderer initialized");
+    }
+
     // ==================== Boucle de jeu ====================
 
     /**
      * Boucle principale du jeu.
      * <p>
-     * Crée le contexte OpenGL et exécute la boucle de jeu jusqu'à ce que
-     * la fenêtre doive se fermer. Chaque itération :
+     * Exécute la boucle de jeu jusqu'à ce que la fenêtre doive se fermer.
+     * Chaque itération :
      * <ol>
      *   <li>Calcule le deltaTime</li>
      *   <li>Met à jour les entrées</li>
@@ -362,26 +409,11 @@ public class Engine {
      * </p>
      */
     private void loop() {
-        logger.info("Creating OpenGL capabilities");
-        GL.createCapabilities();
-
-        // Couleur de fond par défaut (bleu ciel)
-        glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
-
         logger.info("Entering game loop");
 
-        // TEST TEMPORAIRE : Générer quelques chunks au démarrage
-        logger.info("Testing chunk generation...");
-        world.getChunk(0, 0);
-        world.getChunk(1, 0);
-        world.getChunk(0, 1);
-        logger.info("Generated {} chunks", world.getLoadedChunkCount());
-
-        // TEST : Vérifier un bloc
-        int blockAtSurface = world.getBlockAt(0, 64, 0);
-        logger.info("Block at (0, 64, 0): ID={}", blockAtSurface);
-
         double lastTime = glfwGetTime();
+        int frameCount = 0;
+        double lastFpsTime = lastTime;
 
         // Boucle principale
         while (!window.shouldClose()) {
@@ -389,31 +421,39 @@ public class Engine {
             float deltaTime = (float) (currentTime - lastTime);
             lastTime = currentTime;
 
+            // FPS counter
+            frameCount++;
+            if (currentTime - lastFpsTime >= 1.0) {
+                logger.info("FPS: {}, Chunks: {}, Meshes: {}, Triangles: {}K, Pos: ({:.1f}, {:.1f}, {:.1f})",
+                        frameCount,
+                        world.getLoadedChunkCount(),
+                        chunkRenderer.getCachedMeshCount(),
+                        chunkRenderer.getTotalTriangleCount() / 1000,
+                        camera.getPosition().x,
+                        camera.getPosition().y,
+                        camera.getPosition().z
+                );
+                frameCount = 0;
+                lastFpsTime = currentTime;
+            }
+
             // Mise à jour des entrées
             inputManager.update();
 
             // Traitement des événements
             glfwPollEvents();
 
-            // Gestion des inputs (temporaire - à déplacer dans une classe dédiée)
+            // Gestion des inputs
             handleInput();
 
-            // Mise à jour de la caméra
-            cameraController.update(deltaTime);
-
-            // Mise à jour du chargement des chunks
-            chunkLoader.update(camera.getPosition());
+            // Mise à jour de la logique
+            update(deltaTime);
 
             // Rendu
             render();
 
             // Affichage
             window.swapBuffers();
-
-            if (glfwGetTime() - lastStatsLog > 5.0) {
-                logPerformanceStats();
-                lastStatsLog = (long) glfwGetTime();
-            }
         }
 
         logger.info("Game loop ended");
@@ -421,14 +461,6 @@ public class Engine {
 
     /**
      * Gère les entrées utilisateur.
-     * <p>
-     * Temporaire : cette logique sera déplacée dans une classe de gestion d'état.
-     * Actuellement :
-     * <ul>
-     *   <li>ESC : ferme la fenêtre</li>
-     *   <li>SPACE : change la couleur de fond en vert</li>
-     * </ul>
-     * </p>
      */
     private void handleInput() {
         // ESC pour quitter
@@ -436,53 +468,59 @@ public class Engine {
             logger.debug("ESC key pressed, closing window");
             glfwSetWindowShouldClose(window.getHandle(), true);
         }
+
+        // F1 pour toggle cursor
+        if (inputManager.isKeyJustPressed(GLFW_KEY_F1)) {
+            if (inputManager.isCursorCaptured()) {
+                inputManager.releaseCursor();
+                logger.debug("Cursor released");
+            } else {
+                inputManager.captureCursor();
+                logger.debug("Cursor captured");
+            }
+        }
+    }
+
+    /**
+     * Met à jour la logique du jeu.
+     *
+     * @param deltaTime le temps écoulé depuis la dernière frame en secondes
+     */
+    private void update(float deltaTime) {
+        // Mise à jour de la caméra
+        cameraController.update(deltaTime);
+        camera.updateViewMatrix();
+
+        // Mise à jour du chargement des chunks
+        chunkLoader.update(camera.getPosition());
+
+        // Mise à jour du renderer
+        chunkRenderer.update();
     }
 
     /**
      * Effectue le rendu de la frame actuelle.
-     * <p>
-     * Temporaire : nettoie simplement le framebuffer avec la couleur définie.
-     * À terme, cette méthode déléguera le rendu à un système de rendu dédié.
-     * </p>
      */
     private void render() {
         // Nettoyage du framebuffer
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // TODO: Rendu de la scène
-    }
-
-    /**
-     * Met à jour la logique du jeu.
-     * <p>
-     * Non utilisée pour le moment. À terme, cette méthode gérera :
-     * <ul>
-     *   <li>La physique</li>
-     *   <li>L'IA</li>
-     *   <li>Les systèmes de jeu</li>
-     * </ul>
-     * </p>
-     *
-     * @param deltaTime le temps écoulé depuis la dernière frame en secondes
-     */
-    @SuppressWarnings("unused")
-    private void update(float deltaTime) {
-        // TODO: Implémenter la logique de mise à jour
+        // Rendre tous les chunks
+        chunkRenderer.render(camera);
     }
 
     // ==================== Nettoyage ====================
 
     /**
      * Nettoie toutes les ressources avant la fermeture de l'application.
-     * <p>
-     * Libère dans l'ordre :
-     * <ol>
-     *   <li>La fenêtre</li>
-     *   <li>GLFW et son callback d'erreur</li>
-     * </ol>
-     * </p>
      */
     private void cleanup() {
+        logger.debug("Cleaning up chunk renderer");
+        chunkRenderer.cleanup();
+
+        logger.debug("Cleaning up shader");
+        shader.cleanup();
+
         logger.debug("Destroying window");
         window.destroy();
 
@@ -497,13 +535,4 @@ public class Engine {
 
         logger.debug("Cleanup complete");
     }
-
-    private void logPerformanceStats() {
-        logger.info("=== Performance Stats ===");
-        logger.info("Loaded chunks: {}", world.getLoadedChunkCount());
-        logger.info("Load queue: {}", chunkLoader.getLoadQueueSize());
-        logger.info("Unload queue: {}", chunkLoader.getUnloadQueueSize());
-        logger.info("Camera pos: {}", camera.getPosition());
-    }
 }
-

@@ -163,3 +163,46 @@ tasks.register("testReport") {
         println("Test report available at: build/reports/tests/test/index.html")
     }
 }
+
+tasks.register<JavaExec>("testShader") {
+    group = "verification"
+    description = "Test shader system"
+    mainClass.set("org.almostcraft.render.TestShader")
+    classpath = sourceSets["main"].runtimeClasspath
+    if (OperatingSystem.current().isMacOsX) {
+        jvmArgs("-XstartOnFirstThread")
+    }
+}
+
+tasks.register<JavaExec>("testCube") {
+    group = "verification"
+    description = "Test 3D cube rendering"
+    mainClass.set("org.almostcraft.render.TestCube")
+    classpath = sourceSets["main"].runtimeClasspath
+
+    if (OperatingSystem.current().isMacOsX) {
+        jvmArgs("-XstartOnFirstThread")
+    }
+}
+
+tasks.register<JavaExec>("testMesh") {
+    group = "verification"
+    description = "Test Mesh class with multiple cubes"
+    mainClass.set("org.almostcraft.render.TestMesh")
+    classpath = sourceSets["main"].runtimeClasspath
+
+    if (OperatingSystem.current().isMacOsX) {
+        jvmArgs("-XstartOnFirstThread")
+    }
+}
+
+tasks.register<JavaExec>("testChunkMesh") {
+    group = "verification"
+    description = "Test ChunkMesh rendering"
+    mainClass.set("org.almostcraft.render.TestChunkMesh")
+    classpath = sourceSets["main"].runtimeClasspath
+
+    if (OperatingSystem.current().isMacOsX) {
+        jvmArgs("-XstartOnFirstThread")
+    }
+}
