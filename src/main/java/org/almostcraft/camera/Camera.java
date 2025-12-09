@@ -209,4 +209,72 @@ public class Camera {
     public float getPitch() {
         return pitch;
     }
+
+    // ==================== Direction cardinale ====================
+
+    /**
+     * Retourne la direction cardinale vers laquelle la caméra regarde.
+     * <p>
+     * Basé sur l'angle de yaw :
+     * <ul>
+     *   <li>NORTH : -45° à +45° (regarde vers -Z)</li>
+     *   <li>EAST : +45° à +135° (regarde vers +X)</li>
+     *   <li>SOUTH : +135° à -135° (regarde vers +Z)</li>
+     *   <li>WEST : -135° à -45° (regarde vers -X)</li>
+     * </ul>
+     * </p>
+     *
+     * @return la direction cardinale (NORTH, SOUTH, EAST, WEST)
+     */
+    public CardinalDirection getCardinalDirection() {
+        // Normaliser le yaw entre -180 et +180
+        float normalizedYaw = yaw % 360;
+        if (normalizedYaw > 180) {
+            normalizedYaw -= 360;
+        } else if (normalizedYaw < -180) {
+            normalizedYaw += 360;
+        }
+
+        // Déterminer la direction
+        if (normalizedYaw >= -45 && normalizedYaw < 45) {
+            return CardinalDirection.NORTH;
+        } else if (normalizedYaw >= 45 && normalizedYaw < 135) {
+            return CardinalDirection.EAST;
+        } else if (normalizedYaw >= 135 || normalizedYaw < -135) {
+            return CardinalDirection.SOUTH;
+        } else {
+            return CardinalDirection.WEST;
+        }
+    }
+
+    /**
+     * Enum représentant les directions cardinales.
+     */
+    public enum CardinalDirection {
+        NORTH("North", "N"),
+        SOUTH("South", "S"),
+        EAST("East", "E"),
+        WEST("West", "W");
+
+        private final String displayName;
+        private final String abbreviation;
+
+        CardinalDirection(String displayName, String abbreviation) {
+            this.displayName = displayName;
+            this.abbreviation = abbreviation;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public String getAbbreviation() {
+            return abbreviation;
+        }
+
+        @Override
+        public String toString() {
+            return displayName;
+        }
+    }
 }

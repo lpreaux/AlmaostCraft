@@ -455,46 +455,58 @@ public class ChunkMesh {
         float h = height * BLOCK_SIZE;
 
         return switch (direction) {
+            // Face NORTH (regarde vers -Z, normale = [0, 0, -1])
+            // Vue depuis -Z : CCW = bas-gauche, haut-gauche, haut-droite, bas-droite
             case NORTH -> new Vector3f[]{
-                    new Vector3f(x, y, z),
-                    new Vector3f(x, y + h, z),        // Swap : monte avant d'aller à droite
-                    new Vector3f(x + w, y + h, z),    // Swap
-                    new Vector3f(x + w, y, z)
+                    new Vector3f(x, y, z),           // bas-gauche
+                    new Vector3f(x, y + h, z),       // haut-gauche
+                    new Vector3f(x + w, y + h, z),   // haut-droite
+                    new Vector3f(x + w, y, z)        // bas-droite
             };
 
+            // Face SOUTH (regarde vers +Z, normale = [0, 0, 1])
+            // Vue depuis +Z : CCW = bas-droite, haut-droite, haut-gauche, bas-gauche
             case SOUTH -> new Vector3f[]{
-                    new Vector3f(x + w, y, z + BLOCK_SIZE),
-                    new Vector3f(x + w, y + h, z + BLOCK_SIZE),  // Swap
-                    new Vector3f(x, y + h, z + BLOCK_SIZE),      // Swap
-                    new Vector3f(x, y, z + BLOCK_SIZE)
+                    new Vector3f(x + w, y, z + BLOCK_SIZE),        // bas-droite
+                    new Vector3f(x + w, y + h, z + BLOCK_SIZE),    // haut-droite
+                    new Vector3f(x, y + h, z + BLOCK_SIZE),        // haut-gauche
+                    new Vector3f(x, y, z + BLOCK_SIZE)             // bas-gauche
             };
 
+            // Face WEST (regarde vers -X, normale = [-1, 0, 0])
+            // Vue depuis -X : CCW = bas-arrière, haut-arrière, haut-avant, bas-avant
             case WEST -> new Vector3f[]{
-                    new Vector3f(x, y, z + w),
-                    new Vector3f(x, y + h, z + w),    // Swap
-                    new Vector3f(x, y + h, z),        // Swap
-                    new Vector3f(x, y, z)
+                    new Vector3f(x, y, z + w),       // bas-arrière
+                    new Vector3f(x, y + h, z + w),   // haut-arrière
+                    new Vector3f(x, y + h, z),       // haut-avant
+                    new Vector3f(x, y, z)            // bas-avant
             };
 
+            // Face EAST (regarde vers +X, normale = [1, 0, 0])
+            // Vue depuis +X : CCW = bas-avant, haut-avant, haut-arrière, bas-arrière
             case EAST -> new Vector3f[]{
-                    new Vector3f(x + BLOCK_SIZE, y, z),
-                    new Vector3f(x + BLOCK_SIZE, y, z + w),
-                    new Vector3f(x + BLOCK_SIZE, y + h, z + w),
-                    new Vector3f(x + BLOCK_SIZE, y + h, z)
+                    new Vector3f(x + BLOCK_SIZE, y, z),            // bas-avant
+                    new Vector3f(x + BLOCK_SIZE, y + h, z),        // haut-avant
+                    new Vector3f(x + BLOCK_SIZE, y + h, z + w),    // haut-arrière
+                    new Vector3f(x + BLOCK_SIZE, y, z + w)         // bas-arrière
             };
 
+            // Face DOWN (regarde vers -Y, normale = [0, -1, 0])
+            // Vue depuis -Y : CCW = avant-gauche, avant-droite, arrière-droite, arrière-gauche
             case DOWN -> new Vector3f[]{
-                    new Vector3f(x, y, z),
-                    new Vector3f(x + w, y, z),
-                    new Vector3f(x + w, y, z + h),
-                    new Vector3f(x, y, z + h)
+                    new Vector3f(x, y, z),           // avant-gauche
+                    new Vector3f(x + w, y, z),       // avant-droite
+                    new Vector3f(x + w, y, z + h),   // arrière-droite
+                    new Vector3f(x, y, z + h)        // arrière-gauche
             };
 
+            // Face UP (regarde vers +Y, normale = [0, 1, 0])
+            // Vue depuis +Y : CCW = avant-gauche, arrière-gauche, arrière-droite, avant-droite
             case UP -> new Vector3f[]{
-                    new Vector3f(x, y + BLOCK_SIZE, z),
-                    new Vector3f(x, y + BLOCK_SIZE, z + h),
-                    new Vector3f(x + w, y + BLOCK_SIZE, z + h),
-                    new Vector3f(x + w, y + BLOCK_SIZE, z)
+                    new Vector3f(x, y + BLOCK_SIZE, z),            // avant-gauche
+                    new Vector3f(x, y + BLOCK_SIZE, z + h),        // arrière-gauche
+                    new Vector3f(x + w, y + BLOCK_SIZE, z + h),    // arrière-droite
+                    new Vector3f(x + w, y + BLOCK_SIZE, z)         // avant-droite
             };
         };
     }

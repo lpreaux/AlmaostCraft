@@ -328,7 +328,7 @@ public class Engine {
         // Créer le monde
         world = new World(generator, blockRegistry);
 
-        logger.info("World initialized with FlatTerrainGenerator");
+        logger.info("World initialized with SimplexTerrainGenerator");
     }
 
     /**
@@ -424,14 +424,16 @@ public class Engine {
             // FPS counter
             frameCount++;
             if (currentTime - lastFpsTime >= 1.0) {
-                logger.info("FPS: {}, Chunks: {}, Meshes: {}, Triangles: {}K, Pos: ({:.1f}, {:.1f}, {:.1f})",
+                Camera.CardinalDirection direction = camera.getCardinalDirection();
+                logger.info("FPS: {}, Chunks: {}, Meshes: {}, Triangles: {}K, Pos: ({:.1f}, {:.1f}, {:.1f}), Direction: {}",
                         frameCount,
                         world.getLoadedChunkCount(),
                         chunkRenderer.getCachedMeshCount(),
                         chunkRenderer.getTotalTriangleCount() / 1000,
                         camera.getPosition().x,
                         camera.getPosition().y,
-                        camera.getPosition().z
+                        camera.getPosition().z,
+                        direction
                 );
                 frameCount = 0;
                 lastFpsTime = currentTime;

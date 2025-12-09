@@ -198,7 +198,6 @@ public class ChunkRenderer {
 
         int chunksRendered = 0;
 
-        logger.debug("Number of chunks to render: {}", world.getLoadedChunks().size());
         // Parcourir tous les chunks chargés
         for (Chunk chunk : world.getLoadedChunks()) {
             ChunkCoordinate coord = new ChunkCoordinate(
