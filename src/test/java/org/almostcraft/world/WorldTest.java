@@ -3,6 +3,8 @@ package org.almostcraft.world;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.Blocks;
 import org.almostcraft.world.chunk.Chunk;
+import org.almostcraft.world.generation.FlatTerrainGenerator;
+import org.almostcraft.world.generation.TerrainGenerator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +20,8 @@ class WorldTest {
         registry = new BlockRegistry();
         Blocks.register(registry);
         registry.freeze();
-        world = new World(registry);
+        TerrainGenerator generator = new FlatTerrainGenerator(registry);
+        World world = new World(generator, registry);
     }
 
     @Test
@@ -119,5 +122,46 @@ class WorldTest {
 
         world.removeChunk(5, 5);
         assertFalse(world.hasChunk(5, 5));
+    }
+
+    @Test
+    void testWorldGeneratesFlatTerrain() {
+        // Générer un chunk
+        Chunk chunk = world.getChunk(0, 0);
+
+        // Vérifier la stratification
+        int grassId = registry.getNumericId(Blocks.GRASS.id());
+        int dirtId = registry.getNumericId(Blocks.DIRT.id());
+        int stoneId = registry.getNumericId(Blocks.STONE.id());
+        int airId = registry.getNumericId(Blocks.AIR.id());
+
+        // Bloc à la surface (Y=64) devrait être de l'herbe
+        assertEquals(grassId, chunk.getVoxel(0, 64, 0));
+
+        // Blocs de terre (Y=61-63)
+        assertEquals(dirtId, chunk.getVoxel(0, 63, 0));
+        assertEquals(dirtId, chunk.getVoxel(0, 62, 0));
+        assertEquals(dirtId, chunk.getVoxel(0, 61, 0));
+
+        // Pierre en dessous (Y=60)
+        assertEquals(stoneId, chunk.getVoxel(0, 60, 0));
+
+        // Air au-dessus (Y=65+)
+        assertEquals(airId, chunk.getVoxel(0, 65, 0));
+    }
+
+    @Test
+    void testMultipleChunksHaveConsistentTerrain() {
+        int grassId = registry.getNumericId(Blocks.GRASS.id());
+
+        // Générer plusieurs chunks
+        world.getChunk(0, 0);
+        world.getChunk(1, 0);
+        world.getChunk(0, 1);
+
+        // Tous devraient avoir de l'herbe à Y=64
+        assertEquals(grassId, world.getBlockAt(0, 64, 0));    // Chunk (0,0)
+        assertEquals(grassId, world.getBlockAt(16, 64, 0));   // Chunk (1,0)
+        assertEquals(grassId, world.getBlockAt(0, 64, 16));   // Chunk (0,1)
     }
 }

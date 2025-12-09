@@ -3,6 +3,7 @@ package org.almostcraft.world;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.BlockType;
 import org.almostcraft.world.chunk.Chunk;
+import org.almostcraft.world.generation.TerrainGenerator;
 import org.almostcraft.world.utils.CoordinateUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +36,8 @@ public class World {
      */
     private final Map<ChunkCoordinate, Chunk> chunks = new ConcurrentHashMap<>();
 
+    private final TerrainGenerator terrainGenerator;
+
     /**
      * Référence au registre de blocs pour la conversion ID ↔ BlockType.
      */
@@ -46,12 +49,16 @@ public class World {
      * Crée un nouveau monde avec le registre de blocs spécifié.
      *
      * @param blockRegistry le registre de blocs à utiliser
-     * @throws IllegalArgumentException si blockRegistry est null
+     * @throws IllegalArgumentException si terrainGenerator ou blockRegistry sont null
      */
-    public World(BlockRegistry blockRegistry) {
+    public World(TerrainGenerator terrainGenerator, BlockRegistry blockRegistry) {
+        if (terrainGenerator == null) {
+            throw new IllegalArgumentException("TerrainGenerator cannot be null");
+        }
         if (blockRegistry == null) {
             throw new IllegalArgumentException("BlockRegistry cannot be null");
         }
+        this.terrainGenerator = terrainGenerator;
         this.blockRegistry = blockRegistry;
         logger.info("World created");
     }
@@ -73,7 +80,9 @@ public class World {
                 new ChunkCoordinate(chunkX, chunkZ),
                 coord -> {
                     logger.debug("Creating new chunk at ({}, {})", chunkX, chunkZ);
-                    return new Chunk(coord.x(), coord.z());
+                    Chunk chunk = new Chunk(coord.x(), coord.z());
+                    terrainGenerator.generate(chunk, coord.x(), coord.z());
+                    return chunk;
                 }
         );
     }
@@ -215,6 +224,15 @@ public class World {
      */
     public int getLoadedChunkCount() {
         return chunks.size();
+    }
+
+    /**
+     * Retourne le générateur de terrain utilisé par ce monde.
+     *
+     * @return le TerrainGenerator
+     */
+    public TerrainGenerator getTerrainGenerator() {
+        return terrainGenerator;
     }
 
     /**

@@ -3,8 +3,12 @@ package org.almostcraft.core;
 import org.almostcraft.camera.Camera;
 import org.almostcraft.camera.CameraController;
 import org.almostcraft.input.InputManager;
+import org.almostcraft.world.ChunkLoader;
+import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.Blocks;
+import org.almostcraft.world.generation.FlatTerrainGenerator;
+import org.almostcraft.world.generation.TerrainGenerator;
 import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.opengl.GL;
@@ -103,6 +107,16 @@ public class Engine {
     private BlockRegistry blockRegistry;
 
     /**
+     * Le monde du jeu.
+     */
+    private World world;
+
+    /**
+     * Gestionnaire de chargement des chunks.
+     */
+    private ChunkLoader chunkLoader;
+
+    /**
      * Caméra FPS du joueur.
      */
     private Camera camera;
@@ -111,6 +125,9 @@ public class Engine {
      * Contrôleur de la caméra (gère les inputs).
      */
     private CameraController cameraController;
+
+
+    private long lastStatsLog = 0;
 
     // ==================== Point d'entrée ====================
 
@@ -198,7 +215,9 @@ public class Engine {
         initWindow();
         initInput();
         initBlockRegistry();
+        initWorld();
         initCamera();
+        initChunkLoader();
         logger.info("All engine systems initialized");
     }
 
@@ -269,6 +288,21 @@ public class Engine {
     }
 
     /**
+     * Initialise le monde du jeu avec son générateur de terrain.
+     */
+    private void initWorld() {
+        logger.info("Initializing world");
+
+        // Créer le générateur de terrain
+        TerrainGenerator generator = new FlatTerrainGenerator(blockRegistry);
+
+        // Créer le monde""
+        world = new World(generator, blockRegistry);
+
+        logger.info("World initialized with FlatTerrainGenerator");
+    }
+
+    /**
      * Initialise la caméra et son contrôleur.
      * <p>
      * La caméra est placée à une position initiale (0, 5, 10) pour voir la scène,
@@ -290,6 +324,23 @@ public class Engine {
         // cameraController.setMouseSensitivity(0.15f);
         // cameraController.setMoveSpeed(10.0f);
         logger.debug("Camera initialized");
+    }
+
+    /**
+     * Initialise le système de chargement des chunks.
+     */
+    private void initChunkLoader() {
+        logger.info("Initializing chunk loader");
+
+        // Créer le chunk loader avec render distance de 8
+        chunkLoader = new ChunkLoader(world, 12);
+
+        // Charger les chunks initiaux autour de la position de spawn
+        Vector3f spawnPosition = camera.getPosition();
+        chunkLoader.loadInitialChunks(spawnPosition);
+
+        logger.info("Chunk loader initialized with {} chunks loaded",
+                world.getLoadedChunkCount());
     }
 
     // ==================== Boucle de jeu ====================
@@ -317,9 +368,20 @@ public class Engine {
         // Couleur de fond par défaut (bleu ciel)
         glClearColor(0.53f, 0.81f, 0.92f, 1.0f);
 
-        double lastTime = glfwGetTime();
-
         logger.info("Entering game loop");
+
+        // TEST TEMPORAIRE : Générer quelques chunks au démarrage
+        logger.info("Testing chunk generation...");
+        world.getChunk(0, 0);
+        world.getChunk(1, 0);
+        world.getChunk(0, 1);
+        logger.info("Generated {} chunks", world.getLoadedChunkCount());
+
+        // TEST : Vérifier un bloc
+        int blockAtSurface = world.getBlockAt(0, 64, 0);
+        logger.info("Block at (0, 64, 0): ID={}", blockAtSurface);
+
+        double lastTime = glfwGetTime();
 
         // Boucle principale
         while (!window.shouldClose()) {
@@ -336,13 +398,22 @@ public class Engine {
             // Gestion des inputs (temporaire - à déplacer dans une classe dédiée)
             handleInput();
 
+            // Mise à jour de la caméra
             cameraController.update(deltaTime);
+
+            // Mise à jour du chargement des chunks
+            chunkLoader.update(camera.getPosition());
 
             // Rendu
             render();
 
             // Affichage
             window.swapBuffers();
+
+            if (glfwGetTime() - lastStatsLog > 5.0) {
+                logPerformanceStats();
+                lastStatsLog = (long) glfwGetTime();
+            }
         }
 
         logger.info("Game loop ended");
@@ -425,6 +496,14 @@ public class Engine {
         }
 
         logger.debug("Cleanup complete");
+    }
+
+    private void logPerformanceStats() {
+        logger.info("=== Performance Stats ===");
+        logger.info("Loaded chunks: {}", world.getLoadedChunkCount());
+        logger.info("Load queue: {}", chunkLoader.getLoadQueueSize());
+        logger.info("Unload queue: {}", chunkLoader.getUnloadQueueSize());
+        logger.info("Camera pos: {}", camera.getPosition());
     }
 }
 

@@ -53,6 +53,7 @@ val lwjglNatives = Pair(
 
 repositories {
     mavenCentral()
+    maven { url = uri("https://jitpack.io") }
 }
 
 dependencies {
@@ -71,6 +72,7 @@ dependencies {
     runtimeOnly("org.lwjgl", "lwjgl-opengl", classifier = lwjglNatives)
     runtimeOnly("org.lwjgl", "lwjgl-stb", classifier = lwjglNatives)
     implementation("org.joml", "joml", jomlVersion)
+    implementation("com.github.CoolLoong:FastNoise2Bindings-Java:0.0.2")
 
     // Lombok
     compileOnly("org.projectlombok:lombok:$lombokVersion")
