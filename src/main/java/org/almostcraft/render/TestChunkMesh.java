@@ -104,7 +104,7 @@ public class TestChunkMesh {
 
         // Créer le mesh du chunk
         System.out.println("Building chunk mesh...");
-        ChunkMesh chunkMeshBuilder = new ChunkMesh(chunk, blockRegistry);
+        ChunkMesh chunkMeshBuilder = new ChunkMesh(chunk, world, blockRegistry);
         chunkMesh = chunkMeshBuilder.build();
 
         System.out.println("Initialisation terminée !");

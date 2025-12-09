@@ -90,6 +90,10 @@ public class CameraController {
      * @param deltaTime le temps écoulé depuis la dernière frame (en secondes)
      */
     public void update(float deltaTime) {
+        if (!inputManager.isCursorCaptured()) {
+            return;
+        }
+
         handleKeyboardInput(deltaTime);
         handleMouseInput(deltaTime);
 

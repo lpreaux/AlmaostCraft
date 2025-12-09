@@ -227,9 +227,9 @@ public class Engine {
         initBlockRegistry();
         initWorld();
         initCamera();
-        initChunkLoader();
         initShader();
         initChunkRenderer();
+        initChunkLoader();
         logger.info("All engine systems initialized");
     }
 
@@ -362,7 +362,7 @@ public class Engine {
         logger.info("Initializing chunk loader");
 
         // Créer le chunk loader avec render distance de 8
-        chunkLoader = new ChunkLoader(world, 8);
+        chunkLoader = new ChunkLoader(world, 8, chunkRenderer);
 
         // Charger les chunks initiaux autour de la position de spawn
         Vector3f spawnPosition = camera.getPosition();

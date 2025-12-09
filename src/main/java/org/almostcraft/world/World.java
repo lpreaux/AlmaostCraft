@@ -82,6 +82,7 @@ public class World {
                     logger.debug("Creating new chunk at ({}, {})", chunkX, chunkZ);
                     Chunk chunk = new Chunk(coord.x(), coord.z());
                     terrainGenerator.generate(chunk, coord.x(), coord.z());
+                    chunk.markGenerated();
                     return chunk;
                 }
         );
@@ -204,6 +205,61 @@ public class World {
     public BlockType getBlockTypeAt(int worldX, int worldY, int worldZ) {
         int blockId = getBlockAt(worldX, worldY, worldZ);
         return blockRegistry.getBlockByNumericId(blockId);
+    }
+
+    /**
+     * Vérifie si un bloc aux coordonnées mondiales spécifiées bloque la vue.
+     * <p>
+     * Un bloc bloque la vue s'il est solide ET opaque.
+     * Utilisé pour le face culling : si le voisin bloque la vue,
+     * on ne génère pas la face.
+     * </p>
+     * <p>
+     * Cas spéciaux :
+     * <ul>
+     *   <li>Air (ID=0) : Ne bloque pas la vue</li>
+     *   <li>Blocs transparents (verre, eau) : Ne bloquent pas la vue</li>
+     *   <li>Chunk non chargé : Considéré comme ne bloquant pas (on génère la face)</li>
+     * </ul>
+     * </p>
+     *
+     * @param worldX coordonnée X mondiale
+     * @param worldY coordonnée Y mondiale (0-255)
+     * @param worldZ coordonnée Z mondiale
+     * @return true si le bloc bloque la vue, false sinon
+     */
+    public boolean isBlockOccluding(int worldX, int worldY, int worldZ) {
+        // Vérifier que Y est valide
+        if (!CoordinateUtil.isValidWorldY(worldY)) {
+            return false; // Hors limites verticales = pas de bloc = vue libre
+        }
+
+        // Calculer les coordonnées du chunk
+        int chunkX = CoordinateUtil.worldToChunkX(worldX);
+        int chunkZ = CoordinateUtil.worldToChunkZ(worldZ);
+
+        // Si le chunk n'est pas chargé, on considère qu'il ne bloque pas
+        // (on génère la face au bord du chunk)
+        if (!hasChunk(chunkX, chunkZ)) {
+            return false;
+        }
+
+        // Récupérer le bloc
+        int blockId = getBlockAt(worldX, worldY, worldZ);
+
+        // Air ne bloque pas
+        if (blockId == 0) {
+            return false;
+        }
+
+        // Vérifier si le bloc est opaque
+        BlockType blockType = blockRegistry.getBlockByNumericId(blockId);
+        if (blockType == null) {
+            return false; // Bloc inconnu = on génère la face par sécurité
+        }
+
+        // Un bloc bloque la vue s'il est opaque (= non transparent)
+        return blockType.isOpaque();
     }
 
     // ==================== Utilitaires ====================

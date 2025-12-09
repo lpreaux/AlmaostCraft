@@ -1,5 +1,6 @@
 package org.almostcraft.render;
 
+import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.BlockType;
 import org.almostcraft.world.chunk.Chunk;
@@ -69,6 +70,11 @@ public class ChunkMesh {
     private final Chunk chunk;
 
     /**
+     * Référence au monde (pour vérifier les voisins inter-chunks).
+     */
+    private final World world;
+
+    /**
      * Registre de blocs pour obtenir les propriétés des blocs.
      */
     private final BlockRegistry blockRegistry;
@@ -94,18 +100,23 @@ public class ChunkMesh {
      * Crée un générateur de mesh pour le chunk spécifié.
      *
      * @param chunk         le chunk à convertir
+     * @param world         le monde (pour vérifier les voisins)
      * @param blockRegistry le registre de blocs
-     * @throws IllegalArgumentException si chunk ou blockRegistry sont null
+     * @throws IllegalArgumentException si chunk, world ou blockRegistry sont null
      */
-    public ChunkMesh(Chunk chunk, BlockRegistry blockRegistry) {
+    public ChunkMesh(Chunk chunk, World world, BlockRegistry blockRegistry) {
         if (chunk == null) {
             throw new IllegalArgumentException("Chunk cannot be null");
+        }
+        if (world == null) {
+            throw new IllegalArgumentException("World cannot be null");
         }
         if (blockRegistry == null) {
             throw new IllegalArgumentException("BlockRegistry cannot be null");
         }
 
         this.chunk = chunk;
+        this.world = world;
         this.blockRegistry = blockRegistry;
         this.vertices = new ArrayList<>();
         this.indices = new ArrayList<>();
@@ -176,7 +187,7 @@ public class ChunkMesh {
     // ==================== Génération des faces ====================
 
     /**
-     * Génère les 6 faces d'un bloc.
+     * Génère les faces visibles d'un bloc (avec face culling).
      *
      * @param x         coordonnée X locale du bloc
      * @param y         coordonnée Y locale du bloc
@@ -184,22 +195,58 @@ public class ChunkMesh {
      * @param blockType le type de bloc
      */
     private void generateBlockFaces(int x, int y, int z, BlockType blockType) {
-        // Position du bloc dans le monde (coordonnées du chunk)
-        float worldX = chunk.getChunkX() * Chunk.WIDTH + x;
-        float worldY = y;
-        float worldZ = chunk.getChunkZ() * Chunk.DEPTH + z;
+        // Position du bloc dans le monde (coordonnées mondiales)
+        int worldX = chunk.getChunkX() * Chunk.WIDTH + x;
+        int worldY = y;
+        int worldZ = chunk.getChunkZ() * Chunk.DEPTH + z;
 
         // Couleur du bloc (temporaire : basée sur le type)
         Vector3f color = getBlockColor(blockType);
 
-        // Générer les 6 faces
-        // Pour l'instant, on génère TOUTES les faces (version naïve)
-        generateFace(worldX, worldY, worldZ, FaceDirection.NORTH, color);
-        generateFace(worldX, worldY, worldZ, FaceDirection.SOUTH, color);
-        generateFace(worldX, worldY, worldZ, FaceDirection.EAST, color);
-        generateFace(worldX, worldY, worldZ, FaceDirection.WEST, color);
-        generateFace(worldX, worldY, worldZ, FaceDirection.UP, color);
-        generateFace(worldX, worldY, worldZ, FaceDirection.DOWN, color);
+        // Générer uniquement les faces exposées (face culling)
+        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.NORTH)) {
+            generateFace(worldX, worldY, worldZ, FaceDirection.NORTH, color);
+        }
+        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.SOUTH)) {
+            generateFace(worldX, worldY, worldZ, FaceDirection.SOUTH, color);
+        }
+        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.EAST)) {
+            generateFace(worldX, worldY, worldZ, FaceDirection.EAST, color);
+        }
+        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.WEST)) {
+            generateFace(worldX, worldY, worldZ, FaceDirection.WEST, color);
+        }
+        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.UP)) {
+            generateFace(worldX, worldY, worldZ, FaceDirection.UP, color);
+        }
+        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.DOWN)) {
+            generateFace(worldX, worldY, worldZ, FaceDirection.DOWN, color);
+        }
+    }
+
+    /**
+     * Détermine si une face doit être générée dans une direction donnée.
+     * <p>
+     * Une face doit être générée si le bloc voisin dans cette direction
+     * ne bloque PAS la vue (air, transparent, ou chunk non chargé).
+     * </p>
+     *
+     * @param worldX    position X mondiale du bloc
+     * @param worldY    position Y mondiale du bloc
+     * @param worldZ    position Z mondiale du bloc
+     * @param direction direction de la face à tester
+     * @return true si la face doit être générée, false sinon
+     */
+    private boolean shouldGenerateFace(int worldX, int worldY, int worldZ, FaceDirection direction) {
+        // Calculer les coordonnées du voisin
+        int neighborX = worldX + direction.getOffsetX();
+        int neighborY = worldY + direction.getOffsetY();
+        int neighborZ = worldZ + direction.getOffsetZ();
+
+        // Utiliser World.isBlockOccluding pour vérifier si le voisin bloque la vue
+        // Si le voisin NE bloque PAS (air, transparent, chunk non chargé),
+        // alors on doit générer la face
+        return !world.isBlockOccluding(neighborX, neighborY, neighborZ);
     }
 
     /**
@@ -243,6 +290,10 @@ public class ChunkMesh {
 
     /**
      * Retourne les 4 vertices d'une face dans une direction donnée.
+     * <p>
+     * Les vertices sont ordonnés en sens anti-horaire (CCW) quand on
+     * regarde la face DE L'EXTÉRIEUR du bloc.
+     * </p>
      *
      * @param x         position X du bloc
      * @param y         position Y du bloc
@@ -254,41 +305,58 @@ public class ChunkMesh {
         float s = BLOCK_SIZE;
 
         return switch (direction) {
-            case NORTH -> new Vector3f[]{ // -Z
+            // Face NORD (-Z) : regarde vers -Z
+            // Vue depuis l'extérieur (de -Z vers +Z), CCW = bas-gauche, bas-droit, haut-droit, haut-gauche
+            case NORTH -> new Vector3f[]{
+                    new Vector3f(x, y, z),          // 0: bas-gauche
+                    new Vector3f(x + s, y, z),      // 1: bas-droit
+                    new Vector3f(x + s, y + s, z),  // 2: haut-droit
+                    new Vector3f(x, y + s, z)       // 3: haut-gauche
+            };
+
+            // Face SUD (+Z) : regarde vers +Z
+            // Vue depuis l'extérieur (de +Z vers -Z), CCW = bas-droit, bas-gauche, haut-gauche, haut-droit
+            case SOUTH -> new Vector3f[]{
+                    new Vector3f(x + s, y, z + s),      // 0: bas-droit
+                    new Vector3f(x, y, z + s),          // 1: bas-gauche
+                    new Vector3f(x, y + s, z + s),      // 2: haut-gauche
+                    new Vector3f(x + s, y + s, z + s)   // 3: haut-droit
+            };
+
+            // Face OUEST (-X) : regarde vers -X
+            // Vue depuis l'extérieur (de -X vers +X), CCW
+            case WEST -> new Vector3f[]{
+                    new Vector3f(x, y, z + s),      // 0: bas-avant
+                    new Vector3f(x, y, z),          // 1: bas-arrière
+                    new Vector3f(x, y + s, z),      // 2: haut-arrière
+                    new Vector3f(x, y + s, z + s)   // 3: haut-avant
+            };
+
+            // Face EST (+X) : regarde vers +X
+            // Vue depuis l'extérieur (de +X vers -X), CCW
+            case EAST -> new Vector3f[]{
+                    new Vector3f(x + s, y, z),          // 0: bas-arrière
+                    new Vector3f(x + s, y, z + s),      // 1: bas-avant
+                    new Vector3f(x + s, y + s, z + s),  // 2: haut-avant
+                    new Vector3f(x + s, y + s, z)       // 3: haut-arrière
+            };
+
+            // Face BAS (-Y) : regarde vers -Y
+            // Vue depuis l'extérieur (de dessous), CCW
+            case DOWN -> new Vector3f[]{
                     new Vector3f(x, y, z),
                     new Vector3f(x + s, y, z),
-                    new Vector3f(x + s, y + s, z),
-                    new Vector3f(x, y + s, z)
-            };
-            case SOUTH -> new Vector3f[]{ // +Z
                     new Vector3f(x + s, y, z + s),
-                    new Vector3f(x, y, z + s),
-                    new Vector3f(x, y + s, z + s),
-                    new Vector3f(x + s, y + s, z + s)
+                    new Vector3f(x, y, z + s)
             };
-            case WEST -> new Vector3f[]{ // -X
-                    new Vector3f(x, y, z + s),
-                    new Vector3f(x, y, z),
+
+            // Face HAUT (+Y) : regarde vers +Y
+            // Vue depuis l'extérieur (de dessus), CCW
+            case UP -> new Vector3f[]{
                     new Vector3f(x, y + s, z),
-                    new Vector3f(x, y + s, z + s)
-            };
-            case EAST -> new Vector3f[]{ // +X
-                    new Vector3f(x + s, y, z),
-                    new Vector3f(x + s, y, z + s),
+                    new Vector3f(x, y + s, z + s),
                     new Vector3f(x + s, y + s, z + s),
                     new Vector3f(x + s, y + s, z)
-            };
-            case DOWN -> new Vector3f[]{ // -Y
-                    new Vector3f(x, y, z),
-                    new Vector3f(x, y, z + s),
-                    new Vector3f(x + s, y, z + s),
-                    new Vector3f(x + s, y, z)
-            };
-            case UP -> new Vector3f[]{ // +Y
-                    new Vector3f(x, y + s, z),
-                    new Vector3f(x + s, y + s, z),
-                    new Vector3f(x + s, y + s, z + s),
-                    new Vector3f(x, y + s, z + s)
             };
         };
     }
@@ -348,11 +416,33 @@ public class ChunkMesh {
      * Direction d'une face de bloc.
      */
     private enum FaceDirection {
-        NORTH,  // -Z
-        SOUTH,  // +Z
-        WEST,   // -X
-        EAST,   // +X
-        DOWN,   // -Y
-        UP      // +Y
+        NORTH(0, 0, -1),   // -Z
+        SOUTH(0, 0, 1),    // +Z
+        WEST(-1, 0, 0),    // -X
+        EAST(1, 0, 0),     // +X
+        DOWN(0, -1, 0),    // -Y
+        UP(0, 1, 0);       // +Y
+
+        private final int offsetX;
+        private final int offsetY;
+        private final int offsetZ;
+
+        FaceDirection(int offsetX, int offsetY, int offsetZ) {
+            this.offsetX = offsetX;
+            this.offsetY = offsetY;
+            this.offsetZ = offsetZ;
+        }
+
+        public int getOffsetX() {
+            return offsetX;
+        }
+
+        public int getOffsetY() {
+            return offsetY;
+        }
+
+        public int getOffsetZ() {
+            return offsetZ;
+        }
     }
 }

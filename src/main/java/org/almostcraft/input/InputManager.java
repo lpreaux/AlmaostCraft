@@ -135,6 +135,10 @@ public class InputManager {
     public void update() {
         keyboardInput.update();
         mouseInput.update();
+
+        if (!isCursorCaptured()) {
+            mouseInput.resetDelta();
+        }
     }
 
     // ==================== API Clavier ====================

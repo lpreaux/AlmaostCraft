@@ -88,6 +88,11 @@ public class Chunk {
      */
     private boolean modified;
 
+    /**
+     * Indique si le chunk a été complètement généré.
+     */
+    private boolean generated;
+
     // ==================== Constructeur ====================
 
     /**
@@ -104,6 +109,7 @@ public class Chunk {
         this.chunkZ = chunkZ;
         this.voxels = new short[TOTAL_VOXELS];
         this.modified = false;
+        this.generated = false;
 
         logger.debug("Created chunk at ({}, {}) with {} voxels", chunkX, chunkZ, TOTAL_VOXELS);
     }
@@ -309,6 +315,21 @@ public class Chunk {
      */
     public void markModified() {
         modified = true;
+    }
+
+    /**
+     * Marque le chunk comme généré.
+     * À appeler après la génération du terrain.
+     */
+    public void markGenerated() {
+        this.generated = true;
+    }
+
+    /**
+     * Vérifie si le chunk a été généré.
+     */
+    public boolean isGenerated() {
+        return generated;
     }
 
     // ==================== Utilitaires ====================

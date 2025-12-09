@@ -1,5 +1,6 @@
 package org.almostcraft.world;
 
+import org.almostcraft.render.ChunkRenderer;
 import org.almostcraft.world.chunk.Chunk;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
@@ -67,6 +68,8 @@ public class ChunkLoader {
      */
     private final World world;
 
+    private final ChunkRenderer chunkRenderer;
+
     /**
      * Distance de rendu en chunks (rayon autour du joueur).
      */
@@ -114,8 +117,8 @@ public class ChunkLoader {
      *
      * @param world le monde à gérer
      */
-    public ChunkLoader(World world) {
-        this(world, DEFAULT_RENDER_DISTANCE);
+    public ChunkLoader(World world, ChunkRenderer chunkRenderer) {
+        this(world, DEFAULT_RENDER_DISTANCE, chunkRenderer);
     }
 
     /**
@@ -125,7 +128,7 @@ public class ChunkLoader {
      * @param renderDistance la distance de rendu en chunks
      * @throws IllegalArgumentException si world est null ou renderDistance invalide
      */
-    public ChunkLoader(World world, int renderDistance) {
+    public ChunkLoader(World world, int renderDistance, ChunkRenderer chunkRenderer) {
         if (world == null) {
             throw new IllegalArgumentException("World cannot be null");
         }
@@ -142,6 +145,7 @@ public class ChunkLoader {
         this.loadQueue = new LinkedList<>();
         this.unloadQueue = new LinkedList<>();
         this.lastPlayerChunk = null;
+        this.chunkRenderer = chunkRenderer;
 
         logger.info("ChunkLoader created: renderDistance={}, unloadDistance={}",
                 renderDistance, unloadDistance);
@@ -278,6 +282,8 @@ public class ChunkLoader {
                 world.getChunk(coord.x(), coord.z());
                 loadedThisFrame++;
 
+                onChunkLoaded(coord);
+
                 logger.trace("Loaded chunk ({}, {})", coord.x(), coord.z());
             }
         }
@@ -285,6 +291,12 @@ public class ChunkLoader {
         if (loadedThisFrame > 0) {
             logger.debug("Loaded {} chunks this frame (queue: {})",
                     loadedThisFrame, loadQueue.size());
+        }
+    }
+
+    private void onChunkLoaded(ChunkCoordinate coord) {
+        if (chunkRenderer != null) {
+            chunkRenderer.onChunkLoaded(coord.x(), coord.z());
         }
     }
 

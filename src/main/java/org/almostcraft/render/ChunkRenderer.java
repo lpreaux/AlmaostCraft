@@ -246,6 +246,13 @@ public class ChunkRenderer {
      * @return le mesh, ou null si le chunk est vide
      */
     private Mesh getOrCreateMesh(ChunkCoordinate coord, Chunk chunk) {
+        // Vérifier si le chunk est généré
+        if (!chunk.isGenerated()) {
+            logger.trace("Chunk ({}, {}) not fully generated yet, skipping mesh generation",
+                    coord.x(), coord.z());
+            return null;
+        }
+
         // Si le chunk est marqué comme "dirty", régénérer le mesh
         if (dirtyChunks.contains(coord)) {
             Mesh oldMesh = meshCache.remove(coord);
@@ -272,7 +279,7 @@ public class ChunkRenderer {
         logger.debug("Generating mesh for chunk ({}, {})", coord.x(), coord.z());
         long startTime = System.nanoTime();
 
-        ChunkMesh chunkMeshBuilder = new ChunkMesh(chunk, blockRegistry);
+        ChunkMesh chunkMeshBuilder = new ChunkMesh(chunk, world, blockRegistry);
         mesh = chunkMeshBuilder.build();
 
         long endTime = System.nanoTime();
@@ -323,6 +330,23 @@ public class ChunkRenderer {
         dirtyChunks.add(coord);
 
         logger.debug("Forced regeneration of chunk ({}, {})", chunkX, chunkZ);
+    }
+
+    /**
+     * Notifie le renderer qu'un nouveau chunk a été chargé.
+     * Marque les voisins comme dirty pour régénérer leurs bordures.
+     *
+     * @param chunkX coordonnée X du chunk chargé
+     * @param chunkZ coordonnée Z du chunk chargé
+     */
+    public void onChunkLoaded(int chunkX, int chunkZ) {
+        // Marquer les 4 voisins comme dirty
+        markChunkDirty(chunkX - 1, chunkZ);     // Ouest
+        markChunkDirty(chunkX + 1, chunkZ);     // Est
+        markChunkDirty(chunkX, chunkZ - 1);     // Nord
+        markChunkDirty(chunkX, chunkZ + 1);     // Sud
+
+        logger.trace("Marked neighbors of chunk ({}, {}) as dirty", chunkX, chunkZ);
     }
 
     // ==================== Nettoyage ====================
