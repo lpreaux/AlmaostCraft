@@ -450,54 +450,46 @@ public class ChunkMesh {
         indices.add(startIndex);
     }
 
-    /**
-     * Retourne les 4 vertices d'un quad greedy étendu.
-     *
-     * @param x         position X de départ
-     * @param y         position Y de départ
-     * @param z         position Z de départ
-     * @param width     largeur en blocs
-     * @param height    hauteur en blocs
-     * @param direction direction de la face
-     * @return tableau de 4 vertices (CCW vu de l'extérieur)
-     */
-    private Vector3f[] getGreedyQuadVertices(float x, float y, float z,
-                                             int width, int height,
-                                             FaceDirection direction) {
+    private Vector3f[] getGreedyQuadVertices(float x, float y, float z, int width, int height, FaceDirection direction) {
         float w = width * BLOCK_SIZE;
         float h = height * BLOCK_SIZE;
 
         return switch (direction) {
             case NORTH -> new Vector3f[]{
                     new Vector3f(x, y, z),
-                    new Vector3f(x + w, y, z),
-                    new Vector3f(x + w, y + h, z),
-                    new Vector3f(x, y + h, z)
+                    new Vector3f(x, y + h, z),        // Swap : monte avant d'aller à droite
+                    new Vector3f(x + w, y + h, z),    // Swap
+                    new Vector3f(x + w, y, z)
             };
+
             case SOUTH -> new Vector3f[]{
                     new Vector3f(x + w, y, z + BLOCK_SIZE),
-                    new Vector3f(x, y, z + BLOCK_SIZE),
-                    new Vector3f(x, y + h, z + BLOCK_SIZE),
-                    new Vector3f(x + w, y + h, z + BLOCK_SIZE)
+                    new Vector3f(x + w, y + h, z + BLOCK_SIZE),  // Swap
+                    new Vector3f(x, y + h, z + BLOCK_SIZE),      // Swap
+                    new Vector3f(x, y, z + BLOCK_SIZE)
             };
+
             case WEST -> new Vector3f[]{
                     new Vector3f(x, y, z + w),
-                    new Vector3f(x, y, z),
-                    new Vector3f(x, y + h, z),
-                    new Vector3f(x, y + h, z + w)
+                    new Vector3f(x, y + h, z + w),    // Swap
+                    new Vector3f(x, y + h, z),        // Swap
+                    new Vector3f(x, y, z)
             };
+
             case EAST -> new Vector3f[]{
                     new Vector3f(x + BLOCK_SIZE, y, z),
                     new Vector3f(x + BLOCK_SIZE, y, z + w),
                     new Vector3f(x + BLOCK_SIZE, y + h, z + w),
                     new Vector3f(x + BLOCK_SIZE, y + h, z)
             };
+
             case DOWN -> new Vector3f[]{
                     new Vector3f(x, y, z),
                     new Vector3f(x + w, y, z),
                     new Vector3f(x + w, y, z + h),
                     new Vector3f(x, y, z + h)
             };
+
             case UP -> new Vector3f[]{
                     new Vector3f(x, y + BLOCK_SIZE, z),
                     new Vector3f(x, y + BLOCK_SIZE, z + h),

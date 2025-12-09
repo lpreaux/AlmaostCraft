@@ -305,8 +305,8 @@ public class ChunkLoader {
     /**
      * Met à jour la file des chunks à décharger.
      * <p>
-     * Ajoute les chunks actuellement chargés qui sont hors de la distance
-     * de déchargement.
+     * Ajoute les chunks actuellement chargés qui ne sont plus dans
+     * la zone de render (targetChunks).
      * </p>
      *
      * @param playerChunk position du chunk du joueur
@@ -320,11 +320,8 @@ public class ChunkLoader {
         for (Chunk chunk : loadedChunks) {
             ChunkCoordinate coord = new ChunkCoordinate(chunk.getChunkX(), chunk.getChunkZ());
 
-            // Calculer la distance au joueur
-            int distance = manhattanDistance(playerChunk, coord);
-
-            // Si trop éloigné, ajouter à la file de déchargement
-            if (distance > unloadDistance) {
+            // Décharger uniquement si le chunk n'est plus dans les chunks cibles
+            if (!targetChunks.contains(coord)) {
                 unloadQueue.add(coord);
             }
         }
@@ -338,6 +335,12 @@ public class ChunkLoader {
      * Traite la file de déchargement (décharge jusqu'à N chunks par frame).
      */
     private void processUnloadQueue() {
+        // Ne décharger QUE si le chargement est terminé
+        if (!loadQueue.isEmpty()) {
+            logger.trace("Skipping unload: {} chunks still loading", loadQueue.size());
+            return;
+        }
+
         int unloadedThisFrame = 0;
 
         while (!unloadQueue.isEmpty() && unloadedThisFrame < MAX_CHUNKS_TO_UNLOAD_PER_FRAME) {

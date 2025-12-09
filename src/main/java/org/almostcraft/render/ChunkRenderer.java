@@ -198,6 +198,7 @@ public class ChunkRenderer {
 
         int chunksRendered = 0;
 
+        logger.debug("Number of chunks to render: {}", world.getLoadedChunks().size());
         // Parcourir tous les chunks chargés
         for (Chunk chunk : world.getLoadedChunks()) {
             ChunkCoordinate coord = new ChunkCoordinate(
@@ -346,7 +347,7 @@ public class ChunkRenderer {
         markChunkDirty(chunkX, chunkZ - 1);     // Nord
         markChunkDirty(chunkX, chunkZ + 1);     // Sud
 
-        logger.trace("Marked neighbors of chunk ({}, {}) as dirty", chunkX, chunkZ);
+        logger.info("Marked neighbors of chunk ({}, {}) as dirty", chunkX, chunkZ);
     }
 
     // ==================== Nettoyage ====================
