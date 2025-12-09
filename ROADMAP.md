@@ -2,7 +2,7 @@
 
 Excellente idée de projet ! Voici une roadmap progressive pour construire ton moteur voxel.
 
-## Phase 1 : Fondations (2-3 semaines)
+## Phase 1 : Fondations (2-3 semaines) - DONE
 
 ### 1.1 Setup technique
 - **Bibliothèque graphique** : LWJGL (OpenGL) - la référence pour Java
@@ -15,7 +15,7 @@ Excellente idée de projet ! Voici une roadmap progressive pour construire ton m
 - Matrices de vue et projection
 - Contrôles basiques (ZQSD, souris)
 
-## Phase 2 : Système de voxels (3-4 semaines)
+## Phase 2 : Système de voxels (3-4 semaines) - DONE
 
 ### 2.1 Structure de données
 - **Chunk system** : diviser le monde en chunks (16×16×256)

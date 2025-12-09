@@ -11,10 +11,10 @@ Projet éducatif pour comprendre les mécanismes d'un moteur de jeu voxel (type 
 ## 🚀 Fonctionnalités prévues
 
 - [x] Configuration du projet avec Gradle
-- [ ] Rendu OpenGL avec LWJGL
-- [ ] Système de caméra FPS
-- [ ] Génération procédurale de terrain
-- [ ] Gestion des chunks (16×16×256)
+- [x] Rendu OpenGL avec LWJGL
+- [x] Système de caméra FPS
+- [x] Génération procédurale de terrain
+- [x] Gestion des chunks (16×16×256)
 - [ ] Greedy meshing pour optimisation
 - [ ] Système de collision et physique joueur
 - [ ] Placement et destruction de blocs
