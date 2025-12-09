@@ -31,7 +31,6 @@
 - [x] Mesurer amélioration FPS
 
 ## 3.2 - Greedy Meshing (Priorité 3)
-- [ ] Implémenter algorithme greedy meshing 2D (une face à la fois)
-- [ ] Fusionner les quads adjacents du même type
-- [ ] Mesurer amélioration FPS
-- 
+- [x] Implémenter algorithme greedy meshing 2D (une face à la fois)
+- [x] Fusionner les quads adjacents du même type
+- [x] Mesurer amélioration FPS

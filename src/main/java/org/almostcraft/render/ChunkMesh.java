@@ -12,39 +12,22 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Générateur de mesh pour un chunk.
+ * Générateur de mesh pour un chunk avec algorithme de Greedy Meshing.
  * <p>
- * Cette classe convertit un {@link Chunk} (données voxel) en un {@link Mesh}
- * (vertices et indices) prêt à être rendu par OpenGL.
+ * Cette version optimisée fusionne les faces adjacentes identiques pour
+ * réduire drastiquement le nombre de vertices générés.
  * </p>
  * <p>
- * <strong>Version actuelle : Naïve</strong>
+ * Optimisations :
  * <ul>
- *   <li>Génère toutes les faces de tous les blocs solides</li>
- *   <li>Pas de face culling (faces cachées rendues)</li>
- *   <li>Pas de greedy meshing</li>
+ *   <li>Face culling : Ne génère que les faces exposées</li>
+ *   <li>Greedy meshing : Fusionne les faces adjacentes du même type</li>
+ *   <li>Réduction typique de 80-90% des vertices</li>
  * </ul>
- * Optimisations futures :
- * <ul>
- *   <li>Face culling : Ne pas générer les faces contre d'autres blocs</li>
- *   <li>Greedy meshing : Fusionner les faces adjacentes</li>
- *   <li>Ambient occlusion</li>
- * </ul>
- * </p>
- * <p>
- * Utilisation typique :
- * <pre>{@code
- * Chunk chunk = world.getChunk(0, 0);
- * ChunkMesh chunkMesh = new ChunkMesh(chunk, blockRegistry);
- * Mesh mesh = chunkMesh.build();
- *
- * // Dans la boucle de rendu
- * mesh.render();
- * }</pre>
  * </p>
  *
  * @author Lucas Préaux
- * @version 1.0
+ * @version 2.0 (Greedy Meshing)
  */
 public class ChunkMesh {
 
@@ -126,45 +109,23 @@ public class ChunkMesh {
     // ==================== Génération du mesh ====================
 
     /**
-     * Génère et retourne le mesh du chunk.
-     * <p>
-     * Cette méthode parcourt tous les blocs du chunk et génère les faces
-     * pour chaque bloc solide (non-air).
-     * </p>
+     * Génère et retourne le mesh du chunk avec greedy meshing.
      *
-     * @return le mesh prêt à être rendu
+     * @return le mesh optimisé prêt à être rendu
      */
     public Mesh build() {
         long startTime = System.nanoTime();
 
-        logger.debug("Building mesh for chunk ({}, {})", chunk.getChunkX(), chunk.getChunkZ());
+        logger.debug("Building greedy mesh for chunk ({}, {})", chunk.getChunkX(), chunk.getChunkZ());
 
         // Réinitialiser les listes
         vertices.clear();
         indices.clear();
         vertexCount = 0;
 
-        // Parcourir tous les blocs du chunk
-        for (int x = 0; x < Chunk.WIDTH; x++) {
-            for (int y = 0; y < Chunk.HEIGHT; y++) {
-                for (int z = 0; z < Chunk.DEPTH; z++) {
-                    int blockId = chunk.getVoxel(x, y, z);
-
-                    // Ignorer l'air (ID 0)
-                    if (blockId == 0) {
-                        continue;
-                    }
-
-                    // Récupérer le type de bloc
-                    BlockType blockType = blockRegistry.getBlockByNumericId(blockId);
-                    if (blockType == null || !blockType.isSolid()) {
-                        continue;
-                    }
-
-                    // Générer les 6 faces du bloc
-                    generateBlockFaces(x, y, z, blockType);
-                }
-            }
+        // Générer les meshes pour chaque direction
+        for (FaceDirection direction : FaceDirection.values()) {
+            greedyMeshDirection(direction);
         }
 
         // Convertir les listes en arrays
@@ -178,95 +139,298 @@ public class ChunkMesh {
         long endTime = System.nanoTime();
         double duration = (endTime - startTime) / 1_000_000.0; // en ms
 
-        logger.info("Chunk mesh built: {} vertices, {} triangles, {:.2f}ms",
+        logger.info("Greedy mesh built: {} vertices, {} triangles, {:.2f}ms",
                 vertexCount, mesh.getTriangleCount(), duration);
 
         return mesh;
     }
 
-    // ==================== Génération des faces ====================
+    // ==================== Greedy Meshing par direction ====================
 
     /**
-     * Génère les faces visibles d'un bloc (avec face culling).
+     * Génère le mesh greedy pour une direction spécifique.
      *
-     * @param x         coordonnée X locale du bloc
-     * @param y         coordonnée Y locale du bloc
-     * @param z         coordonnée Z locale du bloc
-     * @param blockType le type de bloc
+     * @param direction la direction des faces à traiter
      */
-    private void generateBlockFaces(int x, int y, int z, BlockType blockType) {
-        // Position du bloc dans le monde (coordonnées mondiales)
-        int worldX = chunk.getChunkX() * Chunk.WIDTH + x;
-        int worldY = y;
-        int worldZ = chunk.getChunkZ() * Chunk.DEPTH + z;
+    private void greedyMeshDirection(FaceDirection direction) {
+        // Dimensions du masque selon la direction
+        int width = getMaskWidth(direction);
+        int height = getMaskHeight(direction);
+        int depth = getMaskDepth(direction);
 
-        // Couleur du bloc (temporaire : basée sur le type)
-        Vector3f color = getBlockColor(blockType);
+        // Créer le masque 2D
+        MaskEntry[][] mask = new MaskEntry[width][height];
 
-        // Générer uniquement les faces exposées (face culling)
-        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.NORTH)) {
-            generateFace(worldX, worldY, worldZ, FaceDirection.NORTH, color);
-        }
-        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.SOUTH)) {
-            generateFace(worldX, worldY, worldZ, FaceDirection.SOUTH, color);
-        }
-        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.EAST)) {
-            generateFace(worldX, worldY, worldZ, FaceDirection.EAST, color);
-        }
-        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.WEST)) {
-            generateFace(worldX, worldY, worldZ, FaceDirection.WEST, color);
-        }
-        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.UP)) {
-            generateFace(worldX, worldY, worldZ, FaceDirection.UP, color);
-        }
-        if (shouldGenerateFace(worldX, worldY, worldZ, FaceDirection.DOWN)) {
-            generateFace(worldX, worldY, worldZ, FaceDirection.DOWN, color);
+        // Pour chaque tranche le long de l'axe de la direction
+        for (int d = 0; d < depth; d++) {
+            // Réinitialiser le masque
+            clearMask(mask);
+
+            // Remplir le masque pour cette tranche
+            fillMask(mask, direction, d);
+
+            // Appliquer l'algorithme greedy sur ce masque
+            greedyMesh(mask, direction, d);
         }
     }
 
     /**
-     * Détermine si une face doit être générée dans une direction donnée.
-     * <p>
-     * Une face doit être générée si le bloc voisin dans cette direction
-     * ne bloque PAS la vue (air, transparent, ou chunk non chargé).
-     * </p>
+     * Applique l'algorithme greedy meshing sur un masque 2D.
      *
-     * @param worldX    position X mondiale du bloc
-     * @param worldY    position Y mondiale du bloc
-     * @param worldZ    position Z mondiale du bloc
-     * @param direction direction de la face à tester
-     * @return true si la face doit être générée, false sinon
+     * @param mask      le masque contenant les faces exposées
+     * @param direction la direction des faces
+     * @param depth     la position de la tranche (coordonnée le long de l'axe de direction)
      */
-    private boolean shouldGenerateFace(int worldX, int worldY, int worldZ, FaceDirection direction) {
-        // Calculer les coordonnées du voisin
-        int neighborX = worldX + direction.getOffsetX();
-        int neighborY = worldY + direction.getOffsetY();
-        int neighborZ = worldZ + direction.getOffsetZ();
+    private void greedyMesh(MaskEntry[][] mask, FaceDirection direction, int depth) {
+        int width = mask.length;
+        int height = mask[0].length;
 
-        // Utiliser World.isBlockOccluding pour vérifier si le voisin bloque la vue
-        // Si le voisin NE bloque PAS (air, transparent, chunk non chargé),
-        // alors on doit générer la face
-        return !world.isBlockOccluding(neighborX, neighborY, neighborZ);
+        // Masque de cases déjà consommées
+        boolean[][] consumed = new boolean[width][height];
+
+        // Parcourir le masque
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                // Si la case est vide ou déjà consommée, passer
+                if (mask[x][y] == null || consumed[x][y]) {
+                    continue;
+                }
+
+                MaskEntry entry = mask[x][y];
+
+                // Étape 1 : Expansion horizontale (largeur)
+                int w = computeWidth(mask, consumed, x, y, entry);
+
+                // Étape 2 : Expansion verticale (hauteur) avec cette largeur
+                int h = computeHeight(mask, consumed, x, y, w, entry);
+
+                // Étape 3 : Générer le quad fusionné
+                generateGreedyQuad(x, y, w, h, depth, direction, entry);
+
+                // Étape 4 : Marquer les cases comme consommées
+                markConsumed(consumed, x, y, w, h);
+            }
+        }
+    }
+
+    // ==================== Calcul des dimensions du masque ====================
+
+    /**
+     * Retourne la largeur du masque pour une direction donnée.
+     */
+    private int getMaskWidth(FaceDirection direction) {
+        return switch (direction) {
+            case NORTH, SOUTH -> Chunk.WIDTH;   // Axe X
+            case EAST, WEST -> Chunk.DEPTH;     // Axe Z
+            case UP, DOWN -> Chunk.WIDTH;       // Axe X
+        };
     }
 
     /**
-     * Génère une face d'un bloc dans une direction donnée.
+     * Retourne la hauteur du masque pour une direction donnée.
+     */
+    private int getMaskHeight(FaceDirection direction) {
+        return switch (direction) {
+            case NORTH, SOUTH, EAST, WEST -> Chunk.HEIGHT; // Axe Y
+            case UP, DOWN -> Chunk.DEPTH;                  // Axe Z
+        };
+    }
+
+    /**
+     * Retourne la profondeur (nombre de tranches) pour une direction donnée.
+     */
+    private int getMaskDepth(FaceDirection direction) {
+        return switch (direction) {
+            case NORTH, SOUTH -> Chunk.DEPTH;   // Tranches le long de Z
+            case EAST, WEST -> Chunk.WIDTH;     // Tranches le long de X
+            case UP, DOWN -> Chunk.HEIGHT;      // Tranches le long de Y
+        };
+    }
+
+    // ==================== Remplissage du masque ====================
+
+    /**
+     * Réinitialise un masque (met toutes les cases à null).
+     */
+    private void clearMask(MaskEntry[][] mask) {
+        for (int x = 0; x < mask.length; x++) {
+            for (int y = 0; y < mask[0].length; y++) {
+                mask[x][y] = null;
+            }
+        }
+    }
+
+    /**
+     * Remplit le masque pour une tranche donnée.
      *
-     * @param x         position X du bloc
-     * @param y         position Y du bloc
-     * @param z         position Z du bloc
+     * @param mask      le masque à remplir
+     * @param direction la direction des faces
+     * @param depth     la position de la tranche
+     */
+    private void fillMask(MaskEntry[][] mask, FaceDirection direction, int depth) {
+        int width = mask.length;
+        int height = mask[0].length;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                // Convertir (x, y, depth) en coordonnées de chunk (localX, localY, localZ)
+                int[] localCoords = maskToChunkCoords(x, y, depth, direction);
+                int localX = localCoords[0];
+                int localY = localCoords[1];
+                int localZ = localCoords[2];
+
+                // Vérifier que c'est dans les limites du chunk
+                if (localX < 0 || localX >= Chunk.WIDTH ||
+                        localY < 0 || localY >= Chunk.HEIGHT ||
+                        localZ < 0 || localZ >= Chunk.DEPTH) {
+                    continue;
+                }
+
+                // Récupérer le bloc à cette position
+                int blockId = chunk.getVoxel(localX, localY, localZ);
+
+                // Ignorer l'air
+                if (blockId == 0) {
+                    continue;
+                }
+
+                // Récupérer le type de bloc
+                BlockType blockType = blockRegistry.getBlockByNumericId(blockId);
+                if (blockType == null || !blockType.isSolid()) {
+                    continue;
+                }
+
+                // Convertir en coordonnées mondiales pour vérifier le voisin
+                int worldX = chunk.getChunkX() * Chunk.WIDTH + localX;
+                int worldY = localY;
+                int worldZ = chunk.getChunkZ() * Chunk.DEPTH + localZ;
+
+                // Vérifier si la face est exposée (le voisin ne bloque pas)
+                int neighborX = worldX + direction.getOffsetX();
+                int neighborY = worldY + direction.getOffsetY();
+                int neighborZ = worldZ + direction.getOffsetZ();
+
+                if (!world.isBlockOccluding(neighborX, neighborY, neighborZ)) {
+                    // Face exposée : ajouter au masque
+                    Vector3f color = getBlockColor(blockType);
+                    mask[x][y] = new MaskEntry(blockType, color);
+                }
+            }
+        }
+    }
+
+    /**
+     * Convertit des coordonnées de masque en coordonnées de chunk.
+     *
+     * @param maskX     coordonnée X dans le masque
+     * @param maskY     coordonnée Y dans le masque
+     * @param depth     profondeur de la tranche
+     * @param direction direction du masque
+     * @return tableau [localX, localY, localZ]
+     */
+    private int[] maskToChunkCoords(int maskX, int maskY, int depth, FaceDirection direction) {
+        return switch (direction) {
+            case NORTH -> new int[]{maskX, maskY, depth};           // X, Y, Z
+            case SOUTH -> new int[]{maskX, maskY, depth};           // X, Y, Z
+            case WEST -> new int[]{depth, maskY, maskX};            // Z→X, Y, X→Z
+            case EAST -> new int[]{depth, maskY, maskX};            // Z→X, Y, X→Z
+            case DOWN -> new int[]{maskX, depth, maskY};            // X, Z→Y, Y→Z
+            case UP -> new int[]{maskX, depth, maskY};              // X, Z→Y, Y→Z
+        };
+    }
+
+    // ==================== Expansion greedy ====================
+
+    /**
+     * Calcule la largeur maximale d'expansion horizontale.
+     */
+    private int computeWidth(MaskEntry[][] mask, boolean[][] consumed,
+                             int startX, int startY, MaskEntry entry) {
+        int width = 1;
+        int maxWidth = mask.length;
+
+        while (startX + width < maxWidth &&
+                !consumed[startX + width][startY] &&
+                entry.canMergeWith(mask[startX + width][startY])) {
+            width++;
+        }
+
+        return width;
+    }
+
+    /**
+     * Calcule la hauteur maximale d'expansion verticale pour une largeur donnée.
+     */
+    private int computeHeight(MaskEntry[][] mask, boolean[][] consumed,
+                              int startX, int startY, int width, MaskEntry entry) {
+        int height = 1;
+        int maxHeight = mask[0].length;
+
+        outer:
+        while (startY + height < maxHeight) {
+            // Vérifier que toute la ligne de largeur 'width' peut être fusionnée
+            for (int x = startX; x < startX + width; x++) {
+                if (consumed[x][startY + height] ||
+                        !entry.canMergeWith(mask[x][startY + height])) {
+                    break outer;
+                }
+            }
+            height++;
+        }
+
+        return height;
+    }
+
+    /**
+     * Marque une zone rectangulaire comme consommée.
+     */
+    private void markConsumed(boolean[][] consumed, int startX, int startY, int width, int height) {
+        for (int x = startX; x < startX + width; x++) {
+            for (int y = startY; y < startY + height; y++) {
+                consumed[x][y] = true;
+            }
+        }
+    }
+
+    // ==================== Génération du quad greedy ====================
+
+    /**
+     * Génère un quad fusionné (greedy).
+     *
+     * @param maskX     position X dans le masque
+     * @param maskY     position Y dans le masque
+     * @param width     largeur du quad (en blocs)
+     * @param height    hauteur du quad (en blocs)
+     * @param depth     profondeur de la tranche
      * @param direction direction de la face
-     * @param color     couleur de la face
+     * @param entry     entrée du masque (contient le type et la couleur)
      */
-    private void generateFace(float x, float y, float z, FaceDirection direction, Vector3f color) {
-        // Les 4 vertices de la face (quad)
-        Vector3f[] faceVertices = getFaceVertices(x, y, z, direction);
+    private void generateGreedyQuad(int maskX, int maskY, int width, int height,
+                                    int depth, FaceDirection direction, MaskEntry entry) {
+        // Convertir les coordonnées du masque en coordonnées mondiales
+        int[] startCoords = maskToChunkCoords(maskX, maskY, depth, direction);
+        int localX = startCoords[0];
+        int localY = startCoords[1];
+        int localZ = startCoords[2];
 
-        // Index de départ pour cette face
+        // Convertir en coordonnées mondiales
+        float worldX = chunk.getChunkX() * Chunk.WIDTH + localX;
+        float worldY = localY;
+        float worldZ = chunk.getChunkZ() * Chunk.DEPTH + localZ;
+
+        // Générer les 4 vertices du quad fusionné
+        Vector3f[] quadVertices = getGreedyQuadVertices(
+                worldX, worldY, worldZ, width, height, direction
+        );
+
+        // Couleur
+        Vector3f color = entry.color;
+
+        // Index de départ
         int startIndex = vertexCount;
 
         // Ajouter les 4 vertices
-        for (Vector3f vertex : faceVertices) {
+        for (Vector3f vertex : quadVertices) {
             vertices.add(vertex.x);
             vertices.add(vertex.y);
             vertices.add(vertex.z);
@@ -276,87 +440,69 @@ public class ChunkMesh {
             vertexCount++;
         }
 
-        // Ajouter les indices pour 2 triangles (quad = 2 triangles)
-        // Triangle 1 : 0, 1, 2
+        // Ajouter les indices (2 triangles)
         indices.add(startIndex);
         indices.add(startIndex + 1);
         indices.add(startIndex + 2);
 
-        // Triangle 2 : 2, 3, 0
         indices.add(startIndex + 2);
         indices.add(startIndex + 3);
         indices.add(startIndex);
     }
 
     /**
-     * Retourne les 4 vertices d'une face dans une direction donnée.
-     * <p>
-     * Les vertices sont ordonnés en sens anti-horaire (CCW) quand on
-     * regarde la face DE L'EXTÉRIEUR du bloc.
-     * </p>
+     * Retourne les 4 vertices d'un quad greedy étendu.
      *
-     * @param x         position X du bloc
-     * @param y         position Y du bloc
-     * @param z         position Z du bloc
+     * @param x         position X de départ
+     * @param y         position Y de départ
+     * @param z         position Z de départ
+     * @param width     largeur en blocs
+     * @param height    hauteur en blocs
      * @param direction direction de la face
-     * @return tableau de 4 vertices (dans le sens CCW vu de l'extérieur)
+     * @return tableau de 4 vertices (CCW vu de l'extérieur)
      */
-    private Vector3f[] getFaceVertices(float x, float y, float z, FaceDirection direction) {
-        float s = BLOCK_SIZE;
+    private Vector3f[] getGreedyQuadVertices(float x, float y, float z,
+                                             int width, int height,
+                                             FaceDirection direction) {
+        float w = width * BLOCK_SIZE;
+        float h = height * BLOCK_SIZE;
 
         return switch (direction) {
-            // Face NORD (-Z) : regarde vers -Z
-            // Vue depuis l'extérieur (de -Z vers +Z), CCW = bas-gauche, bas-droit, haut-droit, haut-gauche
             case NORTH -> new Vector3f[]{
-                    new Vector3f(x, y, z),          // 0: bas-gauche
-                    new Vector3f(x + s, y, z),      // 1: bas-droit
-                    new Vector3f(x + s, y + s, z),  // 2: haut-droit
-                    new Vector3f(x, y + s, z)       // 3: haut-gauche
+                    new Vector3f(x, y, z),
+                    new Vector3f(x + w, y, z),
+                    new Vector3f(x + w, y + h, z),
+                    new Vector3f(x, y + h, z)
             };
-
-            // Face SUD (+Z) : regarde vers +Z
-            // Vue depuis l'extérieur (de +Z vers -Z), CCW = bas-droit, bas-gauche, haut-gauche, haut-droit
             case SOUTH -> new Vector3f[]{
-                    new Vector3f(x + s, y, z + s),      // 0: bas-droit
-                    new Vector3f(x, y, z + s),          // 1: bas-gauche
-                    new Vector3f(x, y + s, z + s),      // 2: haut-gauche
-                    new Vector3f(x + s, y + s, z + s)   // 3: haut-droit
+                    new Vector3f(x + w, y, z + BLOCK_SIZE),
+                    new Vector3f(x, y, z + BLOCK_SIZE),
+                    new Vector3f(x, y + h, z + BLOCK_SIZE),
+                    new Vector3f(x + w, y + h, z + BLOCK_SIZE)
             };
-
-            // Face OUEST (-X) : regarde vers -X
-            // Vue depuis l'extérieur (de -X vers +X), CCW
             case WEST -> new Vector3f[]{
-                    new Vector3f(x, y, z + s),      // 0: bas-avant
-                    new Vector3f(x, y, z),          // 1: bas-arrière
-                    new Vector3f(x, y + s, z),      // 2: haut-arrière
-                    new Vector3f(x, y + s, z + s)   // 3: haut-avant
+                    new Vector3f(x, y, z + w),
+                    new Vector3f(x, y, z),
+                    new Vector3f(x, y + h, z),
+                    new Vector3f(x, y + h, z + w)
             };
-
-            // Face EST (+X) : regarde vers +X
-            // Vue depuis l'extérieur (de +X vers -X), CCW
             case EAST -> new Vector3f[]{
-                    new Vector3f(x + s, y, z),          // 0: bas-arrière
-                    new Vector3f(x + s, y, z + s),      // 1: bas-avant
-                    new Vector3f(x + s, y + s, z + s),  // 2: haut-avant
-                    new Vector3f(x + s, y + s, z)       // 3: haut-arrière
+                    new Vector3f(x + BLOCK_SIZE, y, z),
+                    new Vector3f(x + BLOCK_SIZE, y, z + w),
+                    new Vector3f(x + BLOCK_SIZE, y + h, z + w),
+                    new Vector3f(x + BLOCK_SIZE, y + h, z)
             };
-
-            // Face BAS (-Y) : regarde vers -Y
-            // Vue depuis l'extérieur (de dessous), CCW
             case DOWN -> new Vector3f[]{
                     new Vector3f(x, y, z),
-                    new Vector3f(x + s, y, z),
-                    new Vector3f(x + s, y, z + s),
-                    new Vector3f(x, y, z + s)
+                    new Vector3f(x + w, y, z),
+                    new Vector3f(x + w, y, z + h),
+                    new Vector3f(x, y, z + h)
             };
-
-            // Face HAUT (+Y) : regarde vers +Y
-            // Vue depuis l'extérieur (de dessus), CCW
             case UP -> new Vector3f[]{
-                    new Vector3f(x, y + s, z),
-                    new Vector3f(x, y + s, z + s),
-                    new Vector3f(x + s, y + s, z + s),
-                    new Vector3f(x + s, y + s, z)
+                    new Vector3f(x, y + BLOCK_SIZE, z),
+                    new Vector3f(x, y + BLOCK_SIZE, z + h),
+                    new Vector3f(x + w, y + BLOCK_SIZE, z + h),
+                    new Vector3f(x + w, y + BLOCK_SIZE, z)
             };
         };
     }
@@ -365,24 +511,17 @@ public class ChunkMesh {
 
     /**
      * Retourne une couleur temporaire pour un type de bloc.
-     * <p>
-     * À terme, cette méthode sera remplacée par un système de textures.
-     * </p>
-     *
-     * @param blockType le type de bloc
-     * @return la couleur RGB (0-1)
      */
     private Vector3f getBlockColor(BlockType blockType) {
-        // Couleurs basiques selon l'ID du bloc
         return switch (blockType.id()) {
-            case "almostcraft:stone" -> new Vector3f(0.5f, 0.5f, 0.5f);      // Gris
-            case "almostcraft:dirt" -> new Vector3f(0.6f, 0.4f, 0.2f);       // Marron
-            case "almostcraft:grass_block" -> new Vector3f(0.3f, 0.8f, 0.3f); // Vert
-            case "almostcraft:cobblestone" -> new Vector3f(0.4f, 0.4f, 0.4f); // Gris foncé
-            case "almostcraft:sand" -> new Vector3f(0.9f, 0.8f, 0.6f);       // Beige
-            case "almostcraft:oak_planks" -> new Vector3f(0.7f, 0.5f, 0.3f); // Bois
-            case "almostcraft:glass" -> new Vector3f(0.8f, 0.9f, 1.0f);      // Bleu clair
-            default -> new Vector3f(1.0f, 0.0f, 1.0f);                       // Magenta (erreur)
+            case "almostcraft:stone" -> new Vector3f(0.5f, 0.5f, 0.5f);
+            case "almostcraft:dirt" -> new Vector3f(0.6f, 0.4f, 0.2f);
+            case "almostcraft:grass_block" -> new Vector3f(0.3f, 0.8f, 0.3f);
+            case "almostcraft:cobblestone" -> new Vector3f(0.4f, 0.4f, 0.4f);
+            case "almostcraft:sand" -> new Vector3f(0.9f, 0.8f, 0.6f);
+            case "almostcraft:oak_planks" -> new Vector3f(0.7f, 0.5f, 0.3f);
+            case "almostcraft:glass" -> new Vector3f(0.8f, 0.9f, 1.0f);
+            default -> new Vector3f(1.0f, 0.0f, 1.0f);
         };
     }
 
@@ -410,18 +549,41 @@ public class ChunkMesh {
         return array;
     }
 
+    // ==================== Classe interne MaskEntry ====================
+
+    /**
+     * Représente une entrée dans le masque 2D.
+     */
+    private static class MaskEntry {
+        final BlockType blockType;
+        final Vector3f color;
+
+        MaskEntry(BlockType blockType, Vector3f color) {
+            this.blockType = blockType;
+            this.color = color;
+        }
+
+        /**
+         * Vérifie si deux entrées peuvent être fusionnées (même type de bloc).
+         */
+        boolean canMergeWith(MaskEntry other) {
+            if (other == null) return false;
+            return this.blockType.id().equals(other.blockType.id());
+        }
+    }
+
     // ==================== Enum FaceDirection ====================
 
     /**
      * Direction d'une face de bloc.
      */
     private enum FaceDirection {
-        NORTH(0, 0, -1),   // -Z
-        SOUTH(0, 0, 1),    // +Z
-        WEST(-1, 0, 0),    // -X
-        EAST(1, 0, 0),     // +X
-        DOWN(0, -1, 0),    // -Y
-        UP(0, 1, 0);       // +Y
+        NORTH(0, 0, -1),
+        SOUTH(0, 0, 1),
+        WEST(-1, 0, 0),
+        EAST(1, 0, 0),
+        DOWN(0, -1, 0),
+        UP(0, 1, 0);
 
         private final int offsetX;
         private final int offsetY;
