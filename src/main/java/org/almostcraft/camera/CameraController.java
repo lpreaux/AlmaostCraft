@@ -137,9 +137,6 @@ public class CameraController {
             right += 1;
         }
 
-        // TODO: Calculer up en fonction de SPACE et LEFT_SHIFT
-        // Si GLFW_KEY_SPACE est pressé, up += 1
-        // Si GLFW_KEY_LEFT_SHIFT est pressé, up -= 1
         if (inputManager.isKeyDown(GLFW_KEY_SPACE)) {
             up += 1;
         }

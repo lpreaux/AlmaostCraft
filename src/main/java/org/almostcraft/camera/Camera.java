@@ -132,15 +132,15 @@ public class Camera {
 
         // Calculer les vecteurs de direction
         float forwardX = (float) Math.sin(yawRad);
-        float forwardZ = (float) Math.cos(yawRad);
+        float forwardZ = -(float) Math.cos(yawRad);
 
         float rightX = (float) Math.sin(yawRad + Math.PI / 2);
-        float rightZ = (float) Math.cos(yawRad + Math.PI / 2);
+        float rightZ = -(float) Math.cos(yawRad + Math.PI / 2);
 
         // Appliquer le mouvement
-        position.x += forwardX * forward + rightX * right;
+        position.x += (forwardX * forward) + (rightX * right);
         position.y += up;
-        position.z += forwardZ * forward + rightZ * right;
+        position.z += (forwardZ * forward) + (rightZ * right);
     }
 
     // ==================== Rotation ====================
