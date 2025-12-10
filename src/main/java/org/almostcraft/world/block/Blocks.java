@@ -83,7 +83,8 @@ public class Blocks {
             "almostcraft:grass_block",
             true,   // solide
             false,  // opaque
-            "textures/blocks/grass_block.png"
+            "textures/blocks/grass_block_top.png",
+            true
     );
 
     /**

@@ -4,12 +4,15 @@ import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.BlockType;
 import org.almostcraft.world.chunk.Chunk;
+import org.joml.Vector2f;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Générateur de mesh pour un chunk avec algorithme de Greedy Meshing.
@@ -41,9 +44,9 @@ public class ChunkMesh {
     private static final float BLOCK_SIZE = 1.0f;
 
     /**
-     * Nombre de floats par vertex (position + couleur).
+     * Nombre de floats par vertex (position + UV + tint color).
      */
-    private static final int FLOATS_PER_VERTEX = 6; // x, y, z, r, g, b
+    private static final int FLOATS_PER_VERTEX = 8; // x, y, z, u, v, r, g, b
 
     // ==================== Attributs ====================
 
@@ -62,6 +65,8 @@ public class ChunkMesh {
      */
     private final BlockRegistry blockRegistry;
 
+    private final TextureManager textureManager;
+
     /**
      * Liste dynamique des vertices (x, y, z, r, g, b).
      */
@@ -77,6 +82,18 @@ public class ChunkMesh {
      */
     private int vertexCount;
 
+    /**
+     * Map qui stocke un mesh par texture.
+     */
+    private final Map<Texture, MeshData> meshDataByTexture;
+
+    // Classe interne pour stocker les données de mesh
+    private static class MeshData {
+        List<Float> vertices = new ArrayList<>();
+        List<Integer> indices = new ArrayList<>();
+        int vertexCount = 0;
+    }
+
     // ==================== Constructeur ====================
 
     /**
@@ -87,7 +104,7 @@ public class ChunkMesh {
      * @param blockRegistry le registre de blocs
      * @throws IllegalArgumentException si chunk, world ou blockRegistry sont null
      */
-    public ChunkMesh(Chunk chunk, World world, BlockRegistry blockRegistry) {
+    public ChunkMesh(Chunk chunk, World world, BlockRegistry blockRegistry, TextureManager textureManager) {
         if (chunk == null) {
             throw new IllegalArgumentException("Chunk cannot be null");
         }
@@ -97,52 +114,65 @@ public class ChunkMesh {
         if (blockRegistry == null) {
             throw new IllegalArgumentException("BlockRegistry cannot be null");
         }
+        if (textureManager == null) {
+            throw new IllegalArgumentException("TextureManager cannot be null");
+        }
 
         this.chunk = chunk;
         this.world = world;
         this.blockRegistry = blockRegistry;
+        this.textureManager = textureManager;
         this.vertices = new ArrayList<>();
         this.indices = new ArrayList<>();
+        this.meshDataByTexture = new HashMap<>();
         this.vertexCount = 0;
     }
 
     // ==================== Génération du mesh ====================
 
     /**
-     * Génère et retourne le mesh du chunk avec greedy meshing.
-     *
-     * @return le mesh optimisé prêt à être rendu
+     * Génère et retourne une map de meshes par texture.
      */
-    public Mesh build() {
+    public Map<Texture, Mesh> build() {
         long startTime = System.nanoTime();
 
-        logger.debug("Building greedy mesh for chunk ({}, {})", chunk.getChunkX(), chunk.getChunkZ());
+        logger.debug("Building multi-texture mesh for chunk ({}, {})",
+                chunk.getChunkX(), chunk.getChunkZ());
 
-        // Réinitialiser les listes
-        vertices.clear();
-        indices.clear();
-        vertexCount = 0;
+        // Réinitialiser
+        meshDataByTexture.clear();
 
         // Générer les meshes pour chaque direction
         for (FaceDirection direction : FaceDirection.values()) {
             greedyMeshDirection(direction);
         }
 
-        // Convertir les listes en arrays
-        float[] vertexArray = toFloatArray(vertices);
-        int[] indexArray = toIntArray(indices);
+        // Convertir MeshData en Mesh pour chaque texture
+        Map<Texture, Mesh> meshes = new HashMap<>();
 
-        // Créer le mesh
-        Mesh mesh = new Mesh();
-        mesh.uploadData(vertexArray, indexArray);
+        for (Map.Entry<Texture, MeshData> entry : meshDataByTexture.entrySet()) {
+            Texture texture = entry.getKey();
+            MeshData data = entry.getValue();
+
+            float[] vertexArray = toFloatArray(data.vertices);
+            int[] indexArray = toIntArray(data.indices);
+
+            Mesh mesh = new Mesh();
+            mesh.uploadData(vertexArray, indexArray);
+
+            meshes.put(texture, mesh);
+
+            logger.debug("Created mesh for texture {}: {} triangles",
+                    texture.getPath(), mesh.getTriangleCount());
+        }
 
         long endTime = System.nanoTime();
-        double duration = (endTime - startTime) / 1_000_000.0; // en ms
+        double duration = (endTime - startTime) / 1_000_000.0;
 
-        logger.info("Greedy mesh built: {} vertices, {} triangles, {:.2f}ms",
-                vertexCount, mesh.getTriangleCount(), duration);
+        logger.info("Multi-texture mesh built: {} textures, {:.2f}ms",
+                meshes.size(), duration);
 
-        return mesh;
+        return meshes;
     }
 
     // ==================== Greedy Meshing par direction ====================
@@ -311,12 +341,49 @@ public class ChunkMesh {
                 int neighborZ = worldZ + direction.getOffsetZ();
 
                 if (!world.isBlockOccluding(neighborX, neighborY, neighborZ)) {
-                    // Face exposée : ajouter au masque
-                    Vector3f color = getBlockColor(blockType);
-                    mask[x][y] = new MaskEntry(blockType, color);
+                    // Face exposée : récupérer la texture pour cette face
+                    Texture texture = textureManager.getTexture(blockType.getTexturePath());
+                    // Calculer la couleur de teinte
+                    Vector3f tintColor = getTintColor(blockType, worldX, worldY, worldZ);
+                    mask[x][y] = new MaskEntry(blockType, texture,  tintColor);
                 }
             }
         }
+    }
+
+    /**
+     * Retourne la couleur de teinte pour un bloc.
+     *
+     * @param blockType le type de bloc
+     * @param worldX coordonnée X mondiale
+     * @param worldY coordonnée Y mondiale
+     * @param worldZ coordonnée Z mondiale
+     * @return couleur RGB (1,1,1 = pas de teinte)
+     */
+    private Vector3f getTintColor(BlockType blockType, int worldX, int worldY, int worldZ) {
+        // Si le bloc n'est pas teinté, retourner blanc (pas de modification)
+        if (!blockType.isTinted()) {
+            return new Vector3f(1.0f, 1.0f, 1.0f);
+        }
+
+        // Pour l'herbe, retourner une couleur verte
+        // TODO: Plus tard, utiliser la colormap avec température/humidité du biome
+        if (blockType.id().equals("almostcraft:grass_block")) {
+            return getGrassColor(worldX, worldZ);
+        }
+
+        // Autres blocs tintés...
+        return new Vector3f(1.0f, 1.0f, 1.0f);
+    }
+
+    /**
+     * Retourne la couleur de l'herbe selon la position dans le monde.
+     * Version simple sans colormap pour l'instant.
+     */
+    private Vector3f getGrassColor(int worldX, int worldZ) {
+        // Pour l'instant, une couleur verte fixe
+        // Plus tard, on utilisera la colormap avec les biomes
+        return new Vector3f(0.55f, 0.88f, 0.31f); // Vert herbe standard
     }
 
     /**
@@ -395,59 +462,72 @@ public class ChunkMesh {
     // ==================== Génération du quad greedy ====================
 
     /**
-     * Génère un quad fusionné (greedy).
-     *
-     * @param maskX     position X dans le masque
-     * @param maskY     position Y dans le masque
-     * @param width     largeur du quad (en blocs)
-     * @param height    hauteur du quad (en blocs)
-     * @param depth     profondeur de la tranche
-     * @param direction direction de la face
-     * @param entry     entrée du masque (contient le type et la couleur)
+     * Génère un quad et l'ajoute au mesh correspondant à sa texture.
      */
     private void generateGreedyQuad(int maskX, int maskY, int width, int height,
                                     int depth, FaceDirection direction, MaskEntry entry) {
-        // Convertir les coordonnées du masque en coordonnées mondiales
+        // Récupérer ou créer le MeshData pour cette texture
+        Texture texture = entry.texture;
+        MeshData meshData = meshDataByTexture.computeIfAbsent(
+                texture, k -> new MeshData()
+        );
+
+        // Convertir les coordonnées
         int[] startCoords = maskToChunkCoords(maskX, maskY, depth, direction);
         int localX = startCoords[0];
         int localY = startCoords[1];
         int localZ = startCoords[2];
 
-        // Convertir en coordonnées mondiales
         float worldX = chunk.getChunkX() * Chunk.WIDTH + localX;
         float worldY = localY;
         float worldZ = chunk.getChunkZ() * Chunk.DEPTH + localZ;
 
-        // Générer les 4 vertices du quad fusionné
         Vector3f[] quadVertices = getGreedyQuadVertices(
                 worldX, worldY, worldZ, width, height, direction
         );
 
-        // Couleur
-        Vector3f color = entry.color;
+        // UVs avec répétition
+        float maxU = width;
+        float maxV = height;
 
-        // Index de départ
-        int startIndex = vertexCount;
+        Vector2f[] uvCoords = new Vector2f[]{
+                new Vector2f(0, 0),
+                new Vector2f(0, maxV),
+                new Vector2f(maxU, maxV),
+                new Vector2f(maxU, 0)
+        };
 
-        // Ajouter les 4 vertices
-        for (Vector3f vertex : quadVertices) {
-            vertices.add(vertex.x);
-            vertices.add(vertex.y);
-            vertices.add(vertex.z);
-            vertices.add(color.x);
-            vertices.add(color.y);
-            vertices.add(color.z);
-            vertexCount++;
+        // Index de départ pour CE mesh spécifique
+        int startIndex = meshData.vertexCount;
+
+        // Récupérer la couleur de teinte
+        Vector3f tintColor = entry.tintColor;
+
+        // Ajouter les vertices au mesh de cette texture
+        for (int i = 0; i < 4; i++) {
+            Vector3f vertex = quadVertices[i];
+            Vector2f uv = uvCoords[i];
+
+            meshData.vertices.add(vertex.x);
+            meshData.vertices.add(vertex.y);
+            meshData.vertices.add(vertex.z);
+            meshData.vertices.add(uv.x);
+            meshData.vertices.add(uv.y);
+            meshData.vertices.add(tintColor.x);  // R
+            meshData.vertices.add(tintColor.y);  // G
+            meshData.vertices.add(tintColor.z);  // B
+
+            meshData.vertexCount++;
         }
 
-        // Ajouter les indices (2 triangles)
-        indices.add(startIndex);
-        indices.add(startIndex + 1);
-        indices.add(startIndex + 2);
+        // Ajouter les indices
+        meshData.indices.add(startIndex);
+        meshData.indices.add(startIndex + 1);
+        meshData.indices.add(startIndex + 2);
 
-        indices.add(startIndex + 2);
-        indices.add(startIndex + 3);
-        indices.add(startIndex);
+        meshData.indices.add(startIndex + 2);
+        meshData.indices.add(startIndex + 3);
+        meshData.indices.add(startIndex);
     }
 
     private Vector3f[] getGreedyQuadVertices(float x, float y, float z, int width, int height, FaceDirection direction) {
@@ -511,24 +591,6 @@ public class ChunkMesh {
         };
     }
 
-    // ==================== Couleurs ====================
-
-    /**
-     * Retourne une couleur temporaire pour un type de bloc.
-     */
-    private Vector3f getBlockColor(BlockType blockType) {
-        return switch (blockType.id()) {
-            case "almostcraft:stone" -> new Vector3f(0.5f, 0.5f, 0.5f);
-            case "almostcraft:dirt" -> new Vector3f(0.6f, 0.4f, 0.2f);
-            case "almostcraft:grass_block" -> new Vector3f(0.3f, 0.8f, 0.3f);
-            case "almostcraft:cobblestone" -> new Vector3f(0.4f, 0.4f, 0.4f);
-            case "almostcraft:sand" -> new Vector3f(0.9f, 0.8f, 0.6f);
-            case "almostcraft:oak_planks" -> new Vector3f(0.7f, 0.5f, 0.3f);
-            case "almostcraft:glass" -> new Vector3f(0.8f, 0.9f, 1.0f);
-            default -> new Vector3f(1.0f, 0.0f, 1.0f);
-        };
-    }
-
     // ==================== Utilitaires ====================
 
     /**
@@ -560,11 +622,13 @@ public class ChunkMesh {
      */
     private static class MaskEntry {
         final BlockType blockType;
-        final Vector3f color;
+        final Texture texture;
+        final Vector3f tintColor;
 
-        MaskEntry(BlockType blockType, Vector3f color) {
+        MaskEntry(BlockType blockType, Texture texture, Vector3f tintColor) {
             this.blockType = blockType;
-            this.color = color;
+            this.texture = texture;
+            this.tintColor = tintColor;
         }
 
         /**

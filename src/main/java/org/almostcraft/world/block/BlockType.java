@@ -30,7 +30,8 @@ public record BlockType(
         String id,
         boolean isSolid,
         boolean isTransparent,
-        String texturePath
+        String texturePath,
+        boolean isTinted
 ) {
 
     // ==================== Constructeur compact avec validation ====================
@@ -41,6 +42,13 @@ public record BlockType(
     public BlockType {
         validateId(id);
         validateTexturePath(texturePath);
+    }
+
+    /**
+     * Constructeur sans tint (par défaut = false).
+     */
+    public BlockType(String id, boolean isSolid, boolean isTransparent, String texturePath) {
+        this(id, isSolid, isTransparent, texturePath, false);
     }
 
     // ==================== Validation ====================
@@ -119,5 +127,9 @@ public record BlockType(
      */
     public boolean isPassable() {
         return !isSolid;
+    }
+
+    public String getTexturePath() {
+        return texturePath;
     }
 }

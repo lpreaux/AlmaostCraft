@@ -73,10 +73,13 @@ public class ChunkRenderer {
      */
     private final Shader shader;
 
+    private final TextureManager textureManager;
+
     /**
-     * Cache des meshes générés (ChunkCoordinate → Mesh).
+     * Cache des meshes par chunk ET par texture.
+     * Structure : ChunkCoordinate → (Texture → Mesh)
      */
-    private final Map<ChunkCoordinate, Mesh> meshCache;
+    private final Map<ChunkCoordinate, Map<Texture, Mesh>> meshCache;
 
     /**
      * Set des chunks qui nécessitent une régénération de mesh.
@@ -98,7 +101,7 @@ public class ChunkRenderer {
      * @param shader        le shader à utiliser pour le rendu
      * @throws IllegalArgumentException si un paramètre est null
      */
-    public ChunkRenderer(World world, BlockRegistry blockRegistry, Shader shader) {
+    public ChunkRenderer(World world, BlockRegistry blockRegistry, Shader shader, TextureManager textureManager) {
         if (world == null) {
             throw new IllegalArgumentException("World cannot be null");
         }
@@ -108,10 +111,14 @@ public class ChunkRenderer {
         if (shader == null) {
             throw new IllegalArgumentException("Shader cannot be null");
         }
+        if (textureManager == null) {
+            throw new IllegalArgumentException("TextureManager cannot be null");
+        }
 
         this.world = world;
         this.blockRegistry = blockRegistry;
         this.shader = shader;
+        this.textureManager = textureManager;
         this.meshCache = new HashMap<>();
         this.dirtyChunks = new HashSet<>();
         this.totalMeshesGenerated = 0;
@@ -153,10 +160,11 @@ public class ChunkRenderer {
         }
 
         for (ChunkCoordinate coord : toRemove) {
-            Mesh mesh = meshCache.remove(coord);
-            if (mesh != null) {
-                mesh.cleanup();
-                logger.debug("Cleaned up mesh for unloaded chunk ({}, {})", coord.x(), coord.z());
+            for (Mesh mesh : meshCache.remove(coord).values()) {
+                if (mesh != null) {
+                    mesh.cleanup();
+                    logger.debug("Cleaned up mesh for unloaded chunk ({}, {})", coord.x(), coord.z());
+                }
             }
         }
 
@@ -193,49 +201,42 @@ public class ChunkRenderer {
      * @param camera la caméra pour calculer les matrices MVP
      */
     public void render(Camera camera) {
-        // Binder le shader
         shader.bind();
 
-        int chunksRendered = 0;
-
-        // Parcourir tous les chunks chargés
         for (Chunk chunk : world.getLoadedChunks()) {
             ChunkCoordinate coord = new ChunkCoordinate(
                     chunk.getChunkX(),
                     chunk.getChunkZ()
             );
 
-            // Récupérer ou générer le mesh
-            Mesh mesh = getOrCreateMesh(coord, chunk);
+            Map<Texture, Mesh> meshes = getOrCreateMesh(coord, chunk);
 
-            // Si le mesh est vide (chunk vide), ne pas rendre
-            if (mesh == null || mesh.getTriangleCount() == 0) {
+            if (meshes == null || meshes.isEmpty()) {
                 continue;
             }
 
-            // Calculer la matrice Model pour ce chunk
-            // Les blocs sont déjà en coordonnées mondiales, donc Model = Identity
             Matrix4f modelMatrix = new Matrix4f().identity();
-
-            // Calculer MVP
             Matrix4f mvp = new Matrix4f(camera.getProjectionMatrix())
                     .mul(camera.getViewMatrix())
                     .mul(modelMatrix);
 
-            // Envoyer au shader
             shader.setUniform("uMVP", mvp);
 
-            // Rendre le mesh
-            mesh.render();
-            chunksRendered++;
+            // ==================== RENDRE CHAQUE MESH AVEC SA TEXTURE ====================
+            for (Map.Entry<Texture, Mesh> entry : meshes.entrySet()) {
+                Texture texture = entry.getKey();
+                Mesh mesh = entry.getValue();
+
+                // Binder la texture pour ce mesh
+                texture.bind();
+                shader.setUniform("uTexture", 0);
+
+                // Rendre
+                mesh.render();
+            }
         }
 
         shader.unbind();
-
-        // Log occasionnel
-        if (chunksRendered > 0 && totalMeshesGenerated % 10 == 0) {
-            logger.trace("Rendered {} chunks", chunksRendered);
-        }
     }
 
     /**
@@ -245,54 +246,41 @@ public class ChunkRenderer {
      * @param chunk le chunk
      * @return le mesh, ou null si le chunk est vide
      */
-    private Mesh getOrCreateMesh(ChunkCoordinate coord, Chunk chunk) {
-        // Vérifier si le chunk est généré
+    private Map<Texture, Mesh> getOrCreateMesh(ChunkCoordinate coord, Chunk chunk) {
         if (!chunk.isGenerated()) {
-            logger.trace("Chunk ({}, {}) not fully generated yet, skipping mesh generation",
-                    coord.x(), coord.z());
             return null;
         }
 
-        // Si le chunk est marqué comme "dirty", régénérer le mesh
         if (dirtyChunks.contains(coord)) {
-            Mesh oldMesh = meshCache.remove(coord);
-            if (oldMesh != null) {
-                oldMesh.cleanup();
+            Map<Texture, Mesh> oldMeshes = meshCache.remove(coord);
+            if (oldMeshes != null) {
+                for (Mesh mesh : oldMeshes.values()) {
+                    mesh.cleanup();
+                }
             }
             dirtyChunks.remove(coord);
-            logger.debug("Regenerating mesh for modified chunk ({}, {})", coord.x(), coord.z());
         }
 
-        // Récupérer depuis le cache
-        Mesh mesh = meshCache.get(coord);
-        if (mesh != null) {
-            return mesh;
+        Map<Texture, Mesh> meshes = meshCache.get(coord);
+        if (meshes != null) {
+            return meshes;
         }
 
-        // Vérifier si le chunk est vide
         if (chunk.isEmpty()) {
-            logger.trace("Chunk ({}, {}) is empty, skipping mesh generation", coord.x(), coord.z());
             return null;
         }
 
-        // Générer le mesh
-        logger.debug("Generating mesh for chunk ({}, {})", coord.x(), coord.z());
-        long startTime = System.nanoTime();
+        logger.debug("Generating meshes for chunk ({}, {})", coord.x(), coord.z());
 
-        ChunkMesh chunkMeshBuilder = new ChunkMesh(chunk, world, blockRegistry);
-        mesh = chunkMeshBuilder.build();
+        ChunkMesh chunkMeshBuilder = new ChunkMesh(
+                chunk, world, blockRegistry, textureManager
+        );
+        meshes = chunkMeshBuilder.build();
 
-        long endTime = System.nanoTime();
-        double duration = (endTime - startTime) / 1_000_000.0; // en ms
-
-        // Mettre en cache
-        meshCache.put(coord, mesh);
+        meshCache.put(coord, meshes);
         totalMeshesGenerated++;
 
-        logger.debug("Mesh generated for chunk ({}, {}) in {:.2f}ms - {} triangles",
-                coord.x(), coord.z(), duration, mesh.getTriangleCount());
-
-        return mesh;
+        return meshes;
     }
 
     // ==================== Utilitaires ====================
@@ -321,9 +309,10 @@ public class ChunkRenderer {
         ChunkCoordinate coord = new ChunkCoordinate(chunkX, chunkZ);
 
         // Nettoyer l'ancien mesh
-        Mesh oldMesh = meshCache.remove(coord);
-        if (oldMesh != null) {
-            oldMesh.cleanup();
+        for (Mesh oldMesh: meshCache.remove(coord).values()) {
+            if (oldMesh != null) {
+                oldMesh.cleanup();
+            }
         }
 
         // Marquer comme dirty pour régénération au prochain render
@@ -358,16 +347,12 @@ public class ChunkRenderer {
      * </p>
      */
     public void cleanup() {
-        logger.info("Cleaning up ChunkRenderer ({} meshes)", meshCache.size());
-
-        for (Mesh mesh : meshCache.values()) {
-            mesh.cleanup();
+        for (Map<Texture, Mesh> meshes : meshCache.values()) {
+            for (Mesh mesh : meshes.values()) {
+                mesh.cleanup();
+            }
         }
-
         meshCache.clear();
-        dirtyChunks.clear();
-
-        logger.info("ChunkRenderer cleaned up");
     }
 
     // ==================== Getters ====================
@@ -406,6 +391,7 @@ public class ChunkRenderer {
      */
     public int getTotalTriangleCount() {
         return meshCache.values().stream()
+                .flatMap(entry -> entry.values().stream())
                 .mapToInt(Mesh::getTriangleCount)
                 .sum();
     }

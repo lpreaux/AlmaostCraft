@@ -5,6 +5,7 @@ import org.almostcraft.camera.CameraController;
 import org.almostcraft.input.InputManager;
 import org.almostcraft.render.ChunkRenderer;
 import org.almostcraft.render.Shader;
+import org.almostcraft.render.TextureManager;
 import org.almostcraft.world.ChunkLoader;
 import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
@@ -126,6 +127,9 @@ public class Engine {
      */
     private CameraController cameraController;
 
+    private TextureManager textureManager;
+
+
     /**
      * Shader pour le rendu des chunks.
      */
@@ -228,6 +232,7 @@ public class Engine {
         initWorld();
         initCamera();
         initShader();
+        initTextureManager();
         initChunkRenderer();
         initChunkLoader();
         logger.info("All engine systems initialized");
@@ -377,8 +382,14 @@ public class Engine {
      */
     private void initShader() {
         logger.info("Initializing shader");
-        shader = new Shader("shaders/cube.vert", "shaders/cube.frag");
+        shader = new Shader("shaders/block.vert", "shaders/block.frag");
         logger.info("Shader initialized");
+    }
+
+    private void initTextureManager() {
+        logger.info("Initializing texture manager");
+        textureManager = new TextureManager();
+        logger.info("Texture manager initialized");
     }
 
     /**
@@ -386,7 +397,7 @@ public class Engine {
      */
     private void initChunkRenderer() {
         logger.info("Initializing chunk renderer");
-        chunkRenderer = new ChunkRenderer(world, blockRegistry, shader);
+        chunkRenderer = new ChunkRenderer(world, blockRegistry, shader, textureManager);
         logger.info("Chunk renderer initialized");
     }
 

@@ -107,13 +107,13 @@ public class Mesh {
         if (indices == null || indices.length == 0) {
             throw new IllegalArgumentException("Indices array cannot be null or empty");
         }
-        if (vertices.length % 6 != 0) {
+        if (vertices.length % 8 != 0) {
             throw new IllegalArgumentException(
-                    "Vertices array length must be multiple of 6 (x,y,z,r,g,b), got: " + vertices.length
+                    "Vertices array length must be multiple of 8 (x,y,z,u,v,r,g,b), got: " + vertices.length
             );
         }
 
-        logger.debug("Uploading mesh data: {} vertices, {} indices", vertices.length / 6, indices.length);
+        logger.debug("Uploading mesh data: {} vertices, {} indices", vertices.length / 8, indices.length);
 
         // Créer les buffers si c'est le premier upload
         if (!uploaded) {
@@ -128,15 +128,19 @@ public class Mesh {
         glBufferData(GL_ARRAY_BUFFER, vertices, GL_STATIC_DRAW);
 
         // Configurer les attributs
-        int stride = 6 * Float.BYTES; // 6 floats par vertex
+        int stride = 8 * Float.BYTES; // 5 floats par vertex
 
         // Attribut 0 : Position (x, y, z)
         glVertexAttribPointer(0, 3, GL_FLOAT, false, stride, 0);
         glEnableVertexAttribArray(0);
 
-        // Attribut 1 : Couleur (r, g, b)
-        glVertexAttribPointer(1, 3, GL_FLOAT, false, stride, 3 * Float.BYTES);
+        // Attribut 1 : Coordonnées de texture (u, v)
+        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 3 * Float.BYTES);
         glEnableVertexAttribArray(1);
+
+        // Attribut 2 : Couleur de teinte (r, g, b)
+        glVertexAttribPointer(2, 3, GL_FLOAT, false, stride, 5 * Float.BYTES);
+        glEnableVertexAttribArray(2);
 
         // ==================== EBO : Indices ====================
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
