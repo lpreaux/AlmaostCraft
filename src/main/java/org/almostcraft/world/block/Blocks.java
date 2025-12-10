@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory;
  * </p>
  *
  * @author Lucas Préaux
- * @version 1.0
+ * @version 2.0
  */
 public class Blocks {
 
@@ -75,17 +75,20 @@ public class Blocks {
     /**
      * Bloc d'herbe.
      * <p>
-     * Bloc solide et opaque, couche supérieure du terrain.
-     * Texture avec herbe sur le dessus.
+     * Bloc solide et opaque avec textures différentes par face :
+     * - Dessus : herbe verte (avec tint)
+     * - Côtés : terre avec bordure d'herbe
+     * - Dessous : terre
      * </p>
      */
-    public static final BlockType GRASS = new BlockType(
-            "almostcraft:grass_block",
-            true,   // solide
-            false,  // opaque
-            "textures/blocks/grass_block_top.png",
-            true
-    );
+    public static final BlockType GRASS = BlockType.builder("almostcraft:grass_block")
+            .solid(true)
+            .transparent(false)
+            .textureTop("textures/blocks/grass_block_top.png")
+            .textureSide("textures/blocks/grass_block_side.png")
+            .textureBottom("textures/blocks/dirt.png")
+            .tinted(true)  // Pour la coloration verte du dessus
+            .build();
 
     /**
      * Bloc de roche.

@@ -25,12 +25,13 @@ import java.util.Map;
  * <ul>
  *   <li>Face culling : Ne génère que les faces exposées</li>
  *   <li>Greedy meshing : Fusionne les faces adjacentes du même type</li>
+ *   <li>Textures par face : Supporte différentes textures par face (TOP, BOTTOM, SIDES)</li>
  *   <li>Réduction typique de 80-90% des vertices</li>
  * </ul>
  * </p>
  *
  * @author Lucas Préaux
- * @version 2.0 (Greedy Meshing)
+ * @version 3.0 (Multi-textures par face)
  */
 public class ChunkMesh {
 
@@ -66,21 +67,6 @@ public class ChunkMesh {
     private final BlockRegistry blockRegistry;
 
     private final TextureManager textureManager;
-
-    /**
-     * Liste dynamique des vertices (x, y, z, r, g, b).
-     */
-    private final List<Float> vertices;
-
-    /**
-     * Liste dynamique des indices des triangles.
-     */
-    private final List<Integer> indices;
-
-    /**
-     * Compteur de vertices (utilisé pour calculer les indices).
-     */
-    private int vertexCount;
 
     /**
      * Map qui stocke un mesh par texture.
@@ -122,10 +108,7 @@ public class ChunkMesh {
         this.world = world;
         this.blockRegistry = blockRegistry;
         this.textureManager = textureManager;
-        this.vertices = new ArrayList<>();
-        this.indices = new ArrayList<>();
         this.meshDataByTexture = new HashMap<>();
-        this.vertexCount = 0;
     }
 
     // ==================== Génération du mesh ====================
@@ -341,38 +324,56 @@ public class ChunkMesh {
                 int neighborZ = worldZ + direction.getOffsetZ();
 
                 if (!world.isBlockOccluding(neighborX, neighborY, neighborZ)) {
-                    // Face exposée : récupérer la texture pour cette face
-                    Texture texture = textureManager.getTexture(blockType.getTexturePath());
+                    // Face exposée : récupérer la texture pour CETTE FACE SPÉCIFIQUE
+                    BlockType.BlockFace blockFace = directionToBlockFace(direction);
+                    String texturePath = blockType.getTexturePath(blockFace);
+                    Texture texture = textureManager.getTexture(texturePath);
+
                     // Calculer la couleur de teinte
-                    Vector3f tintColor = getTintColor(blockType, worldX, worldY, worldZ);
-                    mask[x][y] = new MaskEntry(blockType, texture,  tintColor);
+                    Vector3f tintColor = getTintColor(blockType, worldX, worldY, worldZ, blockFace);
+
+                    mask[x][y] = new MaskEntry(blockType, texture, tintColor, blockFace);
                 }
             }
         }
     }
 
     /**
-     * Retourne la couleur de teinte pour un bloc.
+     * Convertit une FaceDirection en BlockFace.
+     */
+    private BlockType.BlockFace directionToBlockFace(FaceDirection direction) {
+        return switch (direction) {
+            case UP -> BlockType.BlockFace.TOP;
+            case DOWN -> BlockType.BlockFace.BOTTOM;
+            case NORTH -> BlockType.BlockFace.NORTH;
+            case SOUTH -> BlockType.BlockFace.SOUTH;
+            case EAST -> BlockType.BlockFace.EAST;
+            case WEST -> BlockType.BlockFace.WEST;
+        };
+    }
+
+    /**
+     * Retourne la couleur de teinte pour un bloc et une face spécifique.
      *
      * @param blockType le type de bloc
      * @param worldX coordonnée X mondiale
      * @param worldY coordonnée Y mondiale
      * @param worldZ coordonnée Z mondiale
+     * @param blockFace la face du bloc
      * @return couleur RGB (1,1,1 = pas de teinte)
      */
-    private Vector3f getTintColor(BlockType blockType, int worldX, int worldY, int worldZ) {
+    private Vector3f getTintColor(BlockType blockType, int worldX, int worldY, int worldZ, BlockType.BlockFace blockFace) {
         // Si le bloc n'est pas teinté, retourner blanc (pas de modification)
         if (!blockType.isTinted()) {
             return new Vector3f(1.0f, 1.0f, 1.0f);
         }
 
-        // Pour l'herbe, retourner une couleur verte
-        // TODO: Plus tard, utiliser la colormap avec température/humidité du biome
-        if (blockType.id().equals("almostcraft:grass_block")) {
+        // Pour l'herbe, appliquer la teinte UNIQUEMENT sur le dessus
+        if (blockType.id().equals("almostcraft:grass_block") && blockFace == BlockType.BlockFace.TOP) {
             return getGrassColor(worldX, worldZ);
         }
 
-        // Autres blocs tintés...
+        // Autres blocs tintés ou autres faces...
         return new Vector3f(1.0f, 1.0f, 1.0f);
     }
 
@@ -490,12 +491,26 @@ public class ChunkMesh {
         float maxU = width;
         float maxV = height;
 
-        Vector2f[] uvCoords = new Vector2f[]{
-                new Vector2f(0, 0),
-                new Vector2f(0, maxV),
-                new Vector2f(maxU, maxV),
-                new Vector2f(maxU, 0)
-        };
+        // Pour les faces verticales (NORTH, SOUTH, EAST, WEST), inverser V
+        // Car les vertices vont de bas en haut, mais les UVs doivent aller de haut en bas
+        Vector2f[] uvCoords;
+        if (direction == FaceDirection.UP || direction == FaceDirection.DOWN) {
+            // Faces horizontales : UVs normales
+            uvCoords = new Vector2f[]{
+                    new Vector2f(0, 0),
+                    new Vector2f(0, maxV),
+                    new Vector2f(maxU, maxV),
+                    new Vector2f(maxU, 0)
+            };
+        } else {
+            // Faces verticales : inverser V pour que le haut de la texture soit en haut
+            uvCoords = new Vector2f[]{
+                    new Vector2f(0, maxV),      // bas-gauche → V max
+                    new Vector2f(0, 0),         // haut-gauche → V min
+                    new Vector2f(maxU, 0),      // haut-droite → V min
+                    new Vector2f(maxU, maxV)    // bas-droite → V max
+            };
+        }
 
         // Index de départ pour CE mesh spécifique
         int startIndex = meshData.vertexCount;
@@ -624,19 +639,22 @@ public class ChunkMesh {
         final BlockType blockType;
         final Texture texture;
         final Vector3f tintColor;
+        final BlockType.BlockFace blockFace;
 
-        MaskEntry(BlockType blockType, Texture texture, Vector3f tintColor) {
+        MaskEntry(BlockType blockType, Texture texture, Vector3f tintColor, BlockType.BlockFace blockFace) {
             this.blockType = blockType;
             this.texture = texture;
             this.tintColor = tintColor;
+            this.blockFace = blockFace;
         }
 
         /**
-         * Vérifie si deux entrées peuvent être fusionnées (même type de bloc).
+         * Vérifie si deux entrées peuvent être fusionnées (même type de bloc ET même face).
          */
         boolean canMergeWith(MaskEntry other) {
             if (other == null) return false;
-            return this.blockType.id().equals(other.blockType.id());
+            return this.blockType.id().equals(other.blockType.id())
+                    && this.blockFace == other.blockFace;
         }
     }
 

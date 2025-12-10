@@ -49,7 +49,7 @@ public class SimplexTerrainGenerator implements TerrainGenerator {
      * - 0.1+ : terrain chaotique, montagnes russes
      * </p>
      */
-    private static final float DEFAULT_FREQUENCY = 0.01f;
+    private static final float DEFAULT_FREQUENCY = 0.0054f;
 
     /**
      * Hauteur minimale du terrain (Y minimum pour la surface).

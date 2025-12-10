@@ -329,6 +329,7 @@ public class Engine {
         // Créer le générateur de terrain
         // TerrainGenerator generator = new FlatTerrainGenerator(blockRegistry);
         TerrainGenerator generator = new SimplexTerrainGenerator(blockRegistry);
+        // TerrainGenerator generator = new SimplexTerrainGenerator(blockRegistry, 12345, 0.007f, 40, 220, 7);
 
         // Créer le monde
         world = new World(generator, blockRegistry);
