@@ -1,20 +1,22 @@
 #version 410 core
 
 // Input
+in float vTextureIndex;
 in vec2 vTexCoord;
-in vec3 vTintColor;  // NOUVEAU
+in vec3 vTintColor;
 
 // Uniforms
-uniform sampler2D uTexture;
+uniform sampler2DArray uTextureArray;
 
 // Output
 out vec4 FragColor;
 
 void main() {
-    // Échantillonner la texture (niveaux de gris pour l'herbe)
-    vec4 texColor = texture(uTexture, vTexCoord);
+    // Échantillonner la texture array
+    vec3 texCoord = vec3(vTexCoord, vTextureIndex);
+    vec4 texColor = texture(uTextureArray, texCoord);
 
-    // Appliquer la teinte (multiplication composante par composante)
+    // Appliquer la teinte
     vec3 tintedColor = texColor.rgb * vTintColor;
 
     FragColor = vec4(tintedColor, texColor.a);

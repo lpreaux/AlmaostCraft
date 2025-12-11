@@ -5,12 +5,11 @@ import org.almostcraft.camera.CameraController;
 import org.almostcraft.input.InputManager;
 import org.almostcraft.render.ChunkRenderer;
 import org.almostcraft.render.Shader;
-import org.almostcraft.render.TextureManager;
+import org.almostcraft.render.TextureArray;
 import org.almostcraft.world.ChunkLoader;
 import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.Blocks;
-import org.almostcraft.world.generation.FlatTerrainGenerator;
 import org.almostcraft.world.generation.SimplexTerrainGenerator;
 import org.almostcraft.world.generation.TerrainGenerator;
 import org.joml.Vector3f;
@@ -127,7 +126,7 @@ public class Engine {
      */
     private CameraController cameraController;
 
-    private TextureManager textureManager;
+    private TextureArray textureArray;
 
 
     /**
@@ -190,7 +189,7 @@ public class Engine {
      * Charge les propriétés de configuration depuis le classpath.
      *
      * @return les propriétés chargées
-     * @throws IOException si le fichier ne peut pas être lu
+     * @throws IOException           si le fichier ne peut pas être lu
      * @throws IllegalStateException si le fichier de configuration n'existe pas
      */
     private Properties loadProperties() throws IOException {
@@ -229,10 +228,10 @@ public class Engine {
         initOpenGL();
         initInput();
         initBlockRegistry();
+        initTextureArray();
         initWorld();
         initCamera();
         initShader();
-        initTextureManager();
         initChunkRenderer();
         initChunkLoader();
         logger.info("All engine systems initialized");
@@ -320,6 +319,35 @@ public class Engine {
         logger.info("Block registry initialized with {} blocks", blockRegistry.size());
     }
 
+
+    private void initTextureArray() {
+        logger.info("Initializing texture array");
+
+        try {
+            textureArray = new TextureArray();
+
+            // Ajouter toutes les textures (la première détecte la taille)
+            // textureAtlas.addTexture("textures/blocks/air.png");
+            textureArray.addTexture("textures/blocks/stone.png");
+            textureArray.addTexture("textures/blocks/dirt.png");
+            textureArray.addTexture("textures/blocks/cobblestone.png");
+            textureArray.addTexture("textures/blocks/sand.png");
+            textureArray.addTexture("textures/blocks/oak_planks.png");
+            textureArray.addTexture("textures/blocks/glass.png");
+
+            // Textures pour le grass_block
+            textureArray.addTexture("textures/blocks/grass_block_top.png");
+            textureArray.addTexture("textures/blocks/grass_block_side.png");
+
+            // Construire l'atlas (calcule la grille et combine)
+            textureArray.build();
+
+        } catch (IOException e) {
+            logger.error("Failed to initialize texture array", e);
+            throw new RuntimeException("Failed to initialize texture array", e);
+        }
+    }
+
     /**
      * Initialise le monde du jeu avec son générateur de terrain.
      */
@@ -387,22 +415,16 @@ public class Engine {
         logger.info("Shader initialized");
     }
 
-    private void initTextureManager() {
-        logger.info("Initializing texture manager");
-        textureManager = new TextureManager();
-        logger.info("Texture manager initialized");
-    }
-
     /**
      * Initialise le renderer de chunks.
      */
     private void initChunkRenderer() {
         logger.info("Initializing chunk renderer");
-        chunkRenderer = new ChunkRenderer(world, blockRegistry, shader, textureManager);
+        chunkRenderer = new ChunkRenderer(world, blockRegistry, shader, textureArray);
         logger.info("Chunk renderer initialized");
     }
 
-    // ==================== Boucle de jeu ====================
+// ==================== Boucle de jeu ====================
 
     /**
      * Boucle principale du jeu.
@@ -523,7 +545,7 @@ public class Engine {
         chunkRenderer.render(camera);
     }
 
-    // ==================== Nettoyage ====================
+// ==================== Nettoyage ====================
 
     /**
      * Nettoie toutes les ressources avant la fermeture de l'application.
@@ -531,6 +553,9 @@ public class Engine {
     private void cleanup() {
         logger.debug("Cleaning up chunk renderer");
         chunkRenderer.cleanup();
+
+        logger.debug("Cleaning up texture array");
+        textureArray.cleanup();
 
         logger.debug("Cleaning up shader");
         shader.cleanup();

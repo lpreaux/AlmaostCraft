@@ -13,29 +13,24 @@ import static org.lwjgl.opengl.GL30.*;
 /**
  * Représente un mesh (maillage) 3D avec ses vertices et indices.
  * <p>
- * Cette classe encapsule la gestion des buffers OpenGL (VAO, VBO, EBO)
- * et fournit une API simple pour charger des données et rendre le mesh.
- * </p>
- * <p>
- * Utilisation typique :
- * <pre>{@code
- * Mesh mesh = new Mesh();
- * mesh.uploadData(vertices, indices);
- *
- * // Dans la boucle de rendu
- * mesh.render();
- *
- * // Nettoyage
- * mesh.cleanup();
- * }</pre>
+ * Format des vertices pour texture array :
+ * Position (3) + TextureIndex (1) + TexCoord (2) + TintColor (3) = 9 floats
  * </p>
  *
  * @author Lucas Préaux
- * @version 1.0
+ * @version 2.0 (avec TextureArray)
  */
 public class Mesh {
 
     private static final Logger logger = LoggerFactory.getLogger(Mesh.class);
+
+    // ==================== Constantes ====================
+
+    /**
+     * Nombre de floats par vertex.
+     * Position (3) + TextureIndex (1) + TexCoord (2) + TintColor (3) = 9
+     */
+    private static final int VERTEX_SIZE = 9;
 
     // ==================== Attributs OpenGL ====================
 
@@ -85,18 +80,20 @@ public class Mesh {
     /**
      * Upload les vertices et indices sur le GPU.
      * <p>
-     * Format attendu des vertices : [x, y, z, r, g, b, x, y, z, r, g, b, ...]
+     * Format attendu des vertices : [x, y, z, texIndex, u, v, r, g, b, ...]
      * <ul>
      *   <li>Position (x, y, z) : 3 floats</li>
-     *   <li>Couleur (r, g, b) : 3 floats</li>
+     *   <li>Texture Index : 1 float</li>
+     *   <li>Coordonnées UV (u, v) : 2 floats</li>
+     *   <li>Couleur de teinte (r, g, b) : 3 floats</li>
      * </ul>
-     * Soit 6 floats par vertex.
+     * Soit 9 floats par vertex.
      * </p>
      * <p>
      * Les indices définissent les triangles (3 indices par triangle).
      * </p>
      *
-     * @param vertices tableau des vertices (format: x, y, z, r, g, b)
+     * @param vertices tableau des vertices (format: x,y,z,texIndex,u,v,r,g,b)
      * @param indices  tableau des indices des triangles
      * @throws IllegalArgumentException si les tableaux sont vides ou null
      */
@@ -107,13 +104,16 @@ public class Mesh {
         if (indices == null || indices.length == 0) {
             throw new IllegalArgumentException("Indices array cannot be null or empty");
         }
-        if (vertices.length % 8 != 0) {
+        if (vertices.length % VERTEX_SIZE != 0) {
             throw new IllegalArgumentException(
-                    "Vertices array length must be multiple of 8 (x,y,z,u,v,r,g,b), got: " + vertices.length
+                    String.format("Vertices array length must be multiple of %d " +
+                                    "(x,y,z,texIndex,u,v,r,g,b), got: %d",
+                            VERTEX_SIZE, vertices.length)
             );
         }
 
-        logger.debug("Uploading mesh data: {} vertices, {} indices", vertices.length / 8, indices.length);
+        logger.debug("Uploading mesh data: {} vertices, {} indices",
+                vertices.length / VERTEX_SIZE, indices.length);
 
         // Créer les buffers si c'est le premier upload
         if (!uploaded) {
@@ -128,19 +128,23 @@ public class Mesh {
         glBufferData(GL_ARRAY_BUFFER, vertices, GL_STATIC_DRAW);
 
         // Configurer les attributs
-        int stride = 8 * Float.BYTES; // 5 floats par vertex
+        int stride = VERTEX_SIZE * Float.BYTES;
 
         // Attribut 0 : Position (x, y, z)
         glVertexAttribPointer(0, 3, GL_FLOAT, false, stride, 0);
         glEnableVertexAttribArray(0);
 
-        // Attribut 1 : Coordonnées de texture (u, v)
-        glVertexAttribPointer(1, 2, GL_FLOAT, false, stride, 3 * Float.BYTES);
+        // Attribut 1 : Texture Index (float, sera casté en int dans le shader)
+        glVertexAttribPointer(1, 1, GL_FLOAT, false, stride, 3 * Float.BYTES);
         glEnableVertexAttribArray(1);
 
-        // Attribut 2 : Couleur de teinte (r, g, b)
-        glVertexAttribPointer(2, 3, GL_FLOAT, false, stride, 5 * Float.BYTES);
+        // Attribut 2 : Coordonnées UV (u, v)
+        glVertexAttribPointer(2, 2, GL_FLOAT, false, stride, 4 * Float.BYTES);
         glEnableVertexAttribArray(2);
+
+        // Attribut 3 : Couleur de teinte (r, g, b)
+        glVertexAttribPointer(3, 3, GL_FLOAT, false, stride, 6 * Float.BYTES);
+        glEnableVertexAttribArray(3);
 
         // ==================== EBO : Indices ====================
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
@@ -154,7 +158,8 @@ public class Mesh {
         glBindVertexArray(0);
 
         uploaded = true;
-        logger.debug("Mesh uploaded successfully: VAO={}, VBO={}, EBO={}", vao, vbo, ebo);
+        logger.debug("Mesh uploaded successfully: VAO={}, VBO={}, EBO={}, {} triangles",
+                vao, vbo, ebo, getTriangleCount());
     }
 
     /**
@@ -170,9 +175,15 @@ public class Mesh {
         if (indices == null || indices.remaining() == 0) {
             throw new IllegalArgumentException("Indices buffer cannot be null or empty");
         }
+        if (vertices.remaining() % VERTEX_SIZE != 0) {
+            throw new IllegalArgumentException(
+                    String.format("Vertices buffer size must be multiple of %d, got: %d",
+                            VERTEX_SIZE, vertices.remaining())
+            );
+        }
 
         logger.debug("Uploading mesh data: {} vertices, {} indices",
-                vertices.remaining() / 6, indices.remaining());
+                vertices.remaining() / VERTEX_SIZE, indices.remaining());
 
         // Créer les buffers si nécessaire
         if (!uploaded) {
@@ -185,11 +196,23 @@ public class Mesh {
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, vertices, GL_STATIC_DRAW);
 
-        int stride = 6 * Float.BYTES;
+        int stride = VERTEX_SIZE * Float.BYTES;
+
+        // Attribut 0 : Position
         glVertexAttribPointer(0, 3, GL_FLOAT, false, stride, 0);
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 3, GL_FLOAT, false, stride, 3 * Float.BYTES);
+
+        // Attribut 1 : Texture Index
+        glVertexAttribPointer(1, 1, GL_FLOAT, false, stride, 3 * Float.BYTES);
         glEnableVertexAttribArray(1);
+
+        // Attribut 2 : UV
+        glVertexAttribPointer(2, 2, GL_FLOAT, false, stride, 4 * Float.BYTES);
+        glEnableVertexAttribArray(2);
+
+        // Attribut 3 : Tint Color
+        glVertexAttribPointer(3, 3, GL_FLOAT, false, stride, 6 * Float.BYTES);
+        glEnableVertexAttribArray(3);
 
         // EBO
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
@@ -201,7 +224,8 @@ public class Mesh {
         glBindVertexArray(0);
 
         uploaded = true;
-        logger.debug("Mesh uploaded successfully (buffer variant)");
+        logger.debug("Mesh uploaded successfully (buffer variant), {} triangles",
+                getTriangleCount());
     }
 
     /**
@@ -297,6 +321,15 @@ public class Mesh {
      */
     public int getTriangleCount() {
         return indexCount / 3;
+    }
+
+    /**
+     * Retourne le nombre de vertices dans ce mesh.
+     *
+     * @return le nombre de vertices
+     */
+    public int getVertexCount() {
+        return indexCount; // Approximation, en réalité peut être moins
     }
 
     /**

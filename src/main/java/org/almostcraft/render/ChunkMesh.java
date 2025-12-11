@@ -4,34 +4,18 @@ import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.BlockType;
 import org.almostcraft.world.chunk.Chunk;
-import org.joml.Vector2f;
 import org.joml.Vector3f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Générateur de mesh pour un chunk avec algorithme de Greedy Meshing.
- * <p>
- * Cette version optimisée fusionne les faces adjacentes identiques pour
- * réduire drastiquement le nombre de vertices générés.
- * </p>
- * <p>
- * Optimisations :
- * <ul>
- *   <li>Face culling : Ne génère que les faces exposées</li>
- *   <li>Greedy meshing : Fusionne les faces adjacentes du même type</li>
- *   <li>Textures par face : Supporte différentes textures par face (TOP, BOTTOM, SIDES)</li>
- *   <li>Réduction typique de 80-90% des vertices</li>
- * </ul>
- * </p>
+ * Générateur de mesh pour un chunk avec Greedy Meshing et TextureArray.
  *
  * @author Lucas Préaux
- * @version 3.0 (Multi-textures par face)
+ * @version 5.0 (avec TextureArray)
  */
 public class ChunkMesh {
 
@@ -39,39 +23,16 @@ public class ChunkMesh {
 
     // ==================== Constantes ====================
 
-    /**
-     * Taille d'un bloc (1 unité = 1 bloc).
-     */
     private static final float BLOCK_SIZE = 1.0f;
-
-    /**
-     * Nombre de floats par vertex (position + UV + tint color).
-     */
-    private static final int FLOATS_PER_VERTEX = 8; // x, y, z, u, v, r, g, b
 
     // ==================== Attributs ====================
 
-    /**
-     * Le chunk à convertir en mesh.
-     */
     private final Chunk chunk;
-
-    /**
-     * Référence au monde (pour vérifier les voisins inter-chunks).
-     */
     private final World world;
-
-    /**
-     * Registre de blocs pour obtenir les propriétés des blocs.
-     */
     private final BlockRegistry blockRegistry;
+    private final TextureArray textureArray;
 
-    private final TextureManager textureManager;
-
-    /**
-     * Map qui stocke un mesh par texture.
-     */
-    private final Map<Texture, MeshData> meshDataByTexture;
+    private final MeshData meshData;
 
     // Classe interne pour stocker les données de mesh
     private static class MeshData {
@@ -82,15 +43,7 @@ public class ChunkMesh {
 
     // ==================== Constructeur ====================
 
-    /**
-     * Crée un générateur de mesh pour le chunk spécifié.
-     *
-     * @param chunk         le chunk à convertir
-     * @param world         le monde (pour vérifier les voisins)
-     * @param blockRegistry le registre de blocs
-     * @throws IllegalArgumentException si chunk, world ou blockRegistry sont null
-     */
-    public ChunkMesh(Chunk chunk, World world, BlockRegistry blockRegistry, TextureManager textureManager) {
+    public ChunkMesh(Chunk chunk, World world, BlockRegistry blockRegistry, TextureArray textureArray) {
         if (chunk == null) {
             throw new IllegalArgumentException("Chunk cannot be null");
         }
@@ -100,127 +53,83 @@ public class ChunkMesh {
         if (blockRegistry == null) {
             throw new IllegalArgumentException("BlockRegistry cannot be null");
         }
-        if (textureManager == null) {
-            throw new IllegalArgumentException("TextureManager cannot be null");
+        if (textureArray == null) {
+            throw new IllegalArgumentException("TextureArray cannot be null");
         }
 
         this.chunk = chunk;
         this.world = world;
         this.blockRegistry = blockRegistry;
-        this.textureManager = textureManager;
-        this.meshDataByTexture = new HashMap<>();
+        this.textureArray = textureArray;
+        this.meshData = new MeshData();
     }
 
     // ==================== Génération du mesh ====================
 
-    /**
-     * Génère et retourne une map de meshes par texture.
-     */
-    public Map<Texture, Mesh> build() {
+    public Mesh build() {
         long startTime = System.nanoTime();
 
-        logger.debug("Building multi-texture mesh for chunk ({}, {})",
+        logger.debug("Building mesh with texture array for chunk ({}, {})",
                 chunk.getChunkX(), chunk.getChunkZ());
 
-        // Réinitialiser
-        meshDataByTexture.clear();
+        meshData.vertices.clear();
+        meshData.indices.clear();
+        meshData.vertexCount = 0;
 
-        // Générer les meshes pour chaque direction
         for (FaceDirection direction : FaceDirection.values()) {
             greedyMeshDirection(direction);
         }
 
-        // Convertir MeshData en Mesh pour chaque texture
-        Map<Texture, Mesh> meshes = new HashMap<>();
+        float[] vertexArray = toFloatArray(meshData.vertices);
+        int[] indexArray = toIntArray(meshData.indices);
 
-        for (Map.Entry<Texture, MeshData> entry : meshDataByTexture.entrySet()) {
-            Texture texture = entry.getKey();
-            MeshData data = entry.getValue();
-
-            float[] vertexArray = toFloatArray(data.vertices);
-            int[] indexArray = toIntArray(data.indices);
-
-            Mesh mesh = new Mesh();
-            mesh.uploadData(vertexArray, indexArray);
-
-            meshes.put(texture, mesh);
-
-            logger.debug("Created mesh for texture {}: {} triangles",
-                    texture.getPath(), mesh.getTriangleCount());
-        }
+        Mesh mesh = new Mesh();
+        mesh.uploadData(vertexArray, indexArray);
 
         long endTime = System.nanoTime();
         double duration = (endTime - startTime) / 1_000_000.0;
 
-        logger.info("Multi-texture mesh built: {} textures, {:.2f}ms",
-                meshes.size(), duration);
+        logger.info("Mesh built with array: {} triangles, {:.2f}ms",
+                mesh.getTriangleCount(), duration);
 
-        return meshes;
+        return mesh;
     }
 
     // ==================== Greedy Meshing par direction ====================
 
-    /**
-     * Génère le mesh greedy pour une direction spécifique.
-     *
-     * @param direction la direction des faces à traiter
-     */
     private void greedyMeshDirection(FaceDirection direction) {
-        // Dimensions du masque selon la direction
         int width = getMaskWidth(direction);
         int height = getMaskHeight(direction);
         int depth = getMaskDepth(direction);
 
-        // Créer le masque 2D
         MaskEntry[][] mask = new MaskEntry[width][height];
 
-        // Pour chaque tranche le long de l'axe de la direction
         for (int d = 0; d < depth; d++) {
-            // Réinitialiser le masque
             clearMask(mask);
-
-            // Remplir le masque pour cette tranche
             fillMask(mask, direction, d);
-
-            // Appliquer l'algorithme greedy sur ce masque
             greedyMesh(mask, direction, d);
         }
     }
 
-    /**
-     * Applique l'algorithme greedy meshing sur un masque 2D.
-     *
-     * @param mask      le masque contenant les faces exposées
-     * @param direction la direction des faces
-     * @param depth     la position de la tranche (coordonnée le long de l'axe de direction)
-     */
     private void greedyMesh(MaskEntry[][] mask, FaceDirection direction, int depth) {
         int width = mask.length;
         int height = mask[0].length;
 
-        // Masque de cases déjà consommées
         boolean[][] consumed = new boolean[width][height];
 
-        // Parcourir le masque
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                // Si la case est vide ou déjà consommée, passer
                 if (mask[x][y] == null || consumed[x][y]) {
                     continue;
                 }
 
                 MaskEntry entry = mask[x][y];
 
-                // Étape 1 : Expansion horizontale (largeur)
                 int w = computeWidth(mask, consumed, x, y, entry);
-
-                // Étape 2 : Expansion verticale (hauteur) avec cette largeur
                 int h = computeHeight(mask, consumed, x, y, w, entry);
 
-                // Étape 3 : Générer le quad fusionné
                 generateGreedyQuad(x, y, w, h, depth, direction, entry);
 
-                // Étape 4 : Marquer les cases comme consommées
                 markConsumed(consumed, x, y, w, h);
             }
         }
@@ -228,43 +137,31 @@ public class ChunkMesh {
 
     // ==================== Calcul des dimensions du masque ====================
 
-    /**
-     * Retourne la largeur du masque pour une direction donnée.
-     */
     private int getMaskWidth(FaceDirection direction) {
         return switch (direction) {
-            case NORTH, SOUTH -> Chunk.WIDTH;   // Axe X
-            case EAST, WEST -> Chunk.DEPTH;     // Axe Z
-            case UP, DOWN -> Chunk.WIDTH;       // Axe X
+            case NORTH, SOUTH -> Chunk.WIDTH;
+            case EAST, WEST -> Chunk.DEPTH;
+            case UP, DOWN -> Chunk.WIDTH;
         };
     }
 
-    /**
-     * Retourne la hauteur du masque pour une direction donnée.
-     */
     private int getMaskHeight(FaceDirection direction) {
         return switch (direction) {
-            case NORTH, SOUTH, EAST, WEST -> Chunk.HEIGHT; // Axe Y
-            case UP, DOWN -> Chunk.DEPTH;                  // Axe Z
+            case NORTH, SOUTH, EAST, WEST -> Chunk.HEIGHT;
+            case UP, DOWN -> Chunk.DEPTH;
         };
     }
 
-    /**
-     * Retourne la profondeur (nombre de tranches) pour une direction donnée.
-     */
     private int getMaskDepth(FaceDirection direction) {
         return switch (direction) {
-            case NORTH, SOUTH -> Chunk.DEPTH;   // Tranches le long de Z
-            case EAST, WEST -> Chunk.WIDTH;     // Tranches le long de X
-            case UP, DOWN -> Chunk.HEIGHT;      // Tranches le long de Y
+            case NORTH, SOUTH -> Chunk.DEPTH;
+            case EAST, WEST -> Chunk.WIDTH;
+            case UP, DOWN -> Chunk.HEIGHT;
         };
     }
 
     // ==================== Remplissage du masque ====================
 
-    /**
-     * Réinitialise un masque (met toutes les cases à null).
-     */
     private void clearMask(MaskEntry[][] mask) {
         for (int x = 0; x < mask.length; x++) {
             for (int y = 0; y < mask[0].length; y++) {
@@ -273,74 +170,60 @@ public class ChunkMesh {
         }
     }
 
-    /**
-     * Remplit le masque pour une tranche donnée.
-     *
-     * @param mask      le masque à remplir
-     * @param direction la direction des faces
-     * @param depth     la position de la tranche
-     */
     private void fillMask(MaskEntry[][] mask, FaceDirection direction, int depth) {
         int width = mask.length;
         int height = mask[0].length;
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                // Convertir (x, y, depth) en coordonnées de chunk (localX, localY, localZ)
                 int[] localCoords = maskToChunkCoords(x, y, depth, direction);
                 int localX = localCoords[0];
                 int localY = localCoords[1];
                 int localZ = localCoords[2];
 
-                // Vérifier que c'est dans les limites du chunk
                 if (localX < 0 || localX >= Chunk.WIDTH ||
                         localY < 0 || localY >= Chunk.HEIGHT ||
                         localZ < 0 || localZ >= Chunk.DEPTH) {
                     continue;
                 }
 
-                // Récupérer le bloc à cette position
                 int blockId = chunk.getVoxel(localX, localY, localZ);
 
-                // Ignorer l'air
                 if (blockId == 0) {
                     continue;
                 }
 
-                // Récupérer le type de bloc
                 BlockType blockType = blockRegistry.getBlockByNumericId(blockId);
                 if (blockType == null || !blockType.isSolid()) {
                     continue;
                 }
 
-                // Convertir en coordonnées mondiales pour vérifier le voisin
                 int worldX = chunk.getChunkX() * Chunk.WIDTH + localX;
                 int worldY = localY;
                 int worldZ = chunk.getChunkZ() * Chunk.DEPTH + localZ;
 
-                // Vérifier si la face est exposée (le voisin ne bloque pas)
                 int neighborX = worldX + direction.getOffsetX();
                 int neighborY = worldY + direction.getOffsetY();
                 int neighborZ = worldZ + direction.getOffsetZ();
 
                 if (!world.isBlockOccluding(neighborX, neighborY, neighborZ)) {
-                    // Face exposée : récupérer la texture pour CETTE FACE SPÉCIFIQUE
                     BlockType.BlockFace blockFace = directionToBlockFace(direction);
                     String texturePath = blockType.getTexturePath(blockFace);
-                    Texture texture = textureManager.getTexture(texturePath);
+                    int textureIndex = textureArray.getTextureIndex(texturePath);
 
-                    // Calculer la couleur de teinte
+                    if (textureIndex == -1) {
+                        logger.warn("Texture '{}' not found in array", texturePath);
+                        continue;
+                    }
+
                     Vector3f tintColor = getTintColor(blockType, worldX, worldY, worldZ, blockFace);
 
-                    mask[x][y] = new MaskEntry(blockType, texture, tintColor, blockFace);
+                    mask[x][y] = new MaskEntry(blockType, textureIndex, tintColor, blockFace);
                 }
             }
         }
     }
 
-    /**
-     * Convertit une FaceDirection en BlockFace.
-     */
     private BlockType.BlockFace directionToBlockFace(FaceDirection direction) {
         return switch (direction) {
             case UP -> BlockType.BlockFace.TOP;
@@ -352,66 +235,35 @@ public class ChunkMesh {
         };
     }
 
-    /**
-     * Retourne la couleur de teinte pour un bloc et une face spécifique.
-     *
-     * @param blockType le type de bloc
-     * @param worldX coordonnée X mondiale
-     * @param worldY coordonnée Y mondiale
-     * @param worldZ coordonnée Z mondiale
-     * @param blockFace la face du bloc
-     * @return couleur RGB (1,1,1 = pas de teinte)
-     */
     private Vector3f getTintColor(BlockType blockType, int worldX, int worldY, int worldZ, BlockType.BlockFace blockFace) {
-        // Si le bloc n'est pas teinté, retourner blanc (pas de modification)
         if (!blockType.isTinted()) {
             return new Vector3f(1.0f, 1.0f, 1.0f);
         }
 
-        // Pour l'herbe, appliquer la teinte UNIQUEMENT sur le dessus
         if (blockType.id().equals("almostcraft:grass_block") && blockFace == BlockType.BlockFace.TOP) {
             return getGrassColor(worldX, worldZ);
         }
 
-        // Autres blocs tintés ou autres faces...
         return new Vector3f(1.0f, 1.0f, 1.0f);
     }
 
-    /**
-     * Retourne la couleur de l'herbe selon la position dans le monde.
-     * Version simple sans colormap pour l'instant.
-     */
     private Vector3f getGrassColor(int worldX, int worldZ) {
-        // Pour l'instant, une couleur verte fixe
-        // Plus tard, on utilisera la colormap avec les biomes
-        return new Vector3f(0.55f, 0.88f, 0.31f); // Vert herbe standard
+        return new Vector3f(0.55f, 0.88f, 0.31f);
     }
 
-    /**
-     * Convertit des coordonnées de masque en coordonnées de chunk.
-     *
-     * @param maskX     coordonnée X dans le masque
-     * @param maskY     coordonnée Y dans le masque
-     * @param depth     profondeur de la tranche
-     * @param direction direction du masque
-     * @return tableau [localX, localY, localZ]
-     */
     private int[] maskToChunkCoords(int maskX, int maskY, int depth, FaceDirection direction) {
         return switch (direction) {
-            case NORTH -> new int[]{maskX, maskY, depth};           // X, Y, Z
-            case SOUTH -> new int[]{maskX, maskY, depth};           // X, Y, Z
-            case WEST -> new int[]{depth, maskY, maskX};            // Z→X, Y, X→Z
-            case EAST -> new int[]{depth, maskY, maskX};            // Z→X, Y, X→Z
-            case DOWN -> new int[]{maskX, depth, maskY};            // X, Z→Y, Y→Z
-            case UP -> new int[]{maskX, depth, maskY};              // X, Z→Y, Y→Z
+            case NORTH -> new int[]{maskX, maskY, depth};
+            case SOUTH -> new int[]{maskX, maskY, depth};
+            case WEST -> new int[]{depth, maskY, maskX};
+            case EAST -> new int[]{depth, maskY, maskX};
+            case DOWN -> new int[]{maskX, depth, maskY};
+            case UP -> new int[]{maskX, depth, maskY};
         };
     }
 
     // ==================== Expansion greedy ====================
 
-    /**
-     * Calcule la largeur maximale d'expansion horizontale.
-     */
     private int computeWidth(MaskEntry[][] mask, boolean[][] consumed,
                              int startX, int startY, MaskEntry entry) {
         int width = 1;
@@ -426,9 +278,6 @@ public class ChunkMesh {
         return width;
     }
 
-    /**
-     * Calcule la hauteur maximale d'expansion verticale pour une largeur donnée.
-     */
     private int computeHeight(MaskEntry[][] mask, boolean[][] consumed,
                               int startX, int startY, int width, MaskEntry entry) {
         int height = 1;
@@ -436,7 +285,6 @@ public class ChunkMesh {
 
         outer:
         while (startY + height < maxHeight) {
-            // Vérifier que toute la ligne de largeur 'width' peut être fusionnée
             for (int x = startX; x < startX + width; x++) {
                 if (consumed[x][startY + height] ||
                         !entry.canMergeWith(mask[x][startY + height])) {
@@ -449,9 +297,6 @@ public class ChunkMesh {
         return height;
     }
 
-    /**
-     * Marque une zone rectangulaire comme consommée.
-     */
     private void markConsumed(boolean[][] consumed, int startX, int startY, int width, int height) {
         for (int x = startX; x < startX + width; x++) {
             for (int y = startY; y < startY + height; y++) {
@@ -462,18 +307,8 @@ public class ChunkMesh {
 
     // ==================== Génération du quad greedy ====================
 
-    /**
-     * Génère un quad et l'ajoute au mesh correspondant à sa texture.
-     */
     private void generateGreedyQuad(int maskX, int maskY, int width, int height,
                                     int depth, FaceDirection direction, MaskEntry entry) {
-        // Récupérer ou créer le MeshData pour cette texture
-        Texture texture = entry.texture;
-        MeshData meshData = meshDataByTexture.computeIfAbsent(
-                texture, k -> new MeshData()
-        );
-
-        // Convertir les coordonnées
         int[] startCoords = maskToChunkCoords(maskX, maskY, depth, direction);
         int localX = startCoords[0];
         int localY = startCoords[1];
@@ -487,50 +322,49 @@ public class ChunkMesh {
                 worldX, worldY, worldZ, width, height, direction
         );
 
-        // UVs avec répétition
-        float maxU = width;
-        float maxV = height;
-
-        // Pour les faces verticales (NORTH, SOUTH, EAST, WEST), inverser V
-        // Car les vertices vont de bas en haut, mais les UVs doivent aller de haut en bas
-        Vector2f[] uvCoords;
+        // Coordonnées UV simples avec répétition
+        float[][] uvCoords;
         if (direction == FaceDirection.UP || direction == FaceDirection.DOWN) {
-            // Faces horizontales : UVs normales
-            uvCoords = new Vector2f[]{
-                    new Vector2f(0, 0),
-                    new Vector2f(0, maxV),
-                    new Vector2f(maxU, maxV),
-                    new Vector2f(maxU, 0)
+            uvCoords = new float[][]{
+                    {0, 0},
+                    {0, height},
+                    {width, height},
+                    {width, 0}
             };
         } else {
-            // Faces verticales : inverser V pour que le haut de la texture soit en haut
-            uvCoords = new Vector2f[]{
-                    new Vector2f(0, maxV),      // bas-gauche → V max
-                    new Vector2f(0, 0),         // haut-gauche → V min
-                    new Vector2f(maxU, 0),      // haut-droite → V min
-                    new Vector2f(maxU, maxV)    // bas-droite → V max
+            uvCoords = new float[][]{
+                    {0, height},
+                    {0, 0},
+                    {width, 0},
+                    {width, height}
             };
         }
 
-        // Index de départ pour CE mesh spécifique
         int startIndex = meshData.vertexCount;
-
-        // Récupérer la couleur de teinte
         Vector3f tintColor = entry.tintColor;
+        float textureIndex = entry.textureIndex;
 
-        // Ajouter les vertices au mesh de cette texture
+        // Ajouter les vertices (position, textureIndex, texCoord, tintColor)
         for (int i = 0; i < 4; i++) {
             Vector3f vertex = quadVertices[i];
-            Vector2f uv = uvCoords[i];
+            float[] uv = uvCoords[i];
 
+            // Position (3 floats)
             meshData.vertices.add(vertex.x);
             meshData.vertices.add(vertex.y);
             meshData.vertices.add(vertex.z);
-            meshData.vertices.add(uv.x);
-            meshData.vertices.add(uv.y);
-            meshData.vertices.add(tintColor.x);  // R
-            meshData.vertices.add(tintColor.y);  // G
-            meshData.vertices.add(tintColor.z);  // B
+
+            // Texture index (1 float)
+            meshData.vertices.add(textureIndex);
+
+            // UV coordinates (2 floats)
+            meshData.vertices.add(uv[0]);
+            meshData.vertices.add(uv[1]);
+
+            // Tint color (3 floats)
+            meshData.vertices.add(tintColor.x);
+            meshData.vertices.add(tintColor.y);
+            meshData.vertices.add(tintColor.z);
 
             meshData.vertexCount++;
         }
@@ -550,67 +384,52 @@ public class ChunkMesh {
         float h = height * BLOCK_SIZE;
 
         return switch (direction) {
-            // Face NORTH (regarde vers -Z, normale = [0, 0, -1])
-            // Vue depuis -Z : CCW = bas-gauche, haut-gauche, haut-droite, bas-droite
             case NORTH -> new Vector3f[]{
-                    new Vector3f(x, y, z),           // bas-gauche
-                    new Vector3f(x, y + h, z),       // haut-gauche
-                    new Vector3f(x + w, y + h, z),   // haut-droite
-                    new Vector3f(x + w, y, z)        // bas-droite
+                    new Vector3f(x, y, z),
+                    new Vector3f(x, y + h, z),
+                    new Vector3f(x + w, y + h, z),
+                    new Vector3f(x + w, y, z)
             };
 
-            // Face SOUTH (regarde vers +Z, normale = [0, 0, 1])
-            // Vue depuis +Z : CCW = bas-droite, haut-droite, haut-gauche, bas-gauche
             case SOUTH -> new Vector3f[]{
-                    new Vector3f(x + w, y, z + BLOCK_SIZE),        // bas-droite
-                    new Vector3f(x + w, y + h, z + BLOCK_SIZE),    // haut-droite
-                    new Vector3f(x, y + h, z + BLOCK_SIZE),        // haut-gauche
-                    new Vector3f(x, y, z + BLOCK_SIZE)             // bas-gauche
+                    new Vector3f(x + w, y, z + BLOCK_SIZE),
+                    new Vector3f(x + w, y + h, z + BLOCK_SIZE),
+                    new Vector3f(x, y + h, z + BLOCK_SIZE),
+                    new Vector3f(x, y, z + BLOCK_SIZE)
             };
 
-            // Face WEST (regarde vers -X, normale = [-1, 0, 0])
-            // Vue depuis -X : CCW = bas-arrière, haut-arrière, haut-avant, bas-avant
             case WEST -> new Vector3f[]{
-                    new Vector3f(x, y, z + w),       // bas-arrière
-                    new Vector3f(x, y + h, z + w),   // haut-arrière
-                    new Vector3f(x, y + h, z),       // haut-avant
-                    new Vector3f(x, y, z)            // bas-avant
+                    new Vector3f(x, y, z + w),
+                    new Vector3f(x, y + h, z + w),
+                    new Vector3f(x, y + h, z),
+                    new Vector3f(x, y, z)
             };
 
-            // Face EAST (regarde vers +X, normale = [1, 0, 0])
-            // Vue depuis +X : CCW = bas-avant, haut-avant, haut-arrière, bas-arrière
             case EAST -> new Vector3f[]{
-                    new Vector3f(x + BLOCK_SIZE, y, z),            // bas-avant
-                    new Vector3f(x + BLOCK_SIZE, y + h, z),        // haut-avant
-                    new Vector3f(x + BLOCK_SIZE, y + h, z + w),    // haut-arrière
-                    new Vector3f(x + BLOCK_SIZE, y, z + w)         // bas-arrière
+                    new Vector3f(x + BLOCK_SIZE, y, z),
+                    new Vector3f(x + BLOCK_SIZE, y + h, z),
+                    new Vector3f(x + BLOCK_SIZE, y + h, z + w),
+                    new Vector3f(x + BLOCK_SIZE, y, z + w)
             };
 
-            // Face DOWN (regarde vers -Y, normale = [0, -1, 0])
-            // Vue depuis -Y : CCW = avant-gauche, avant-droite, arrière-droite, arrière-gauche
             case DOWN -> new Vector3f[]{
-                    new Vector3f(x, y, z),           // avant-gauche
-                    new Vector3f(x + w, y, z),       // avant-droite
-                    new Vector3f(x + w, y, z + h),   // arrière-droite
-                    new Vector3f(x, y, z + h)        // arrière-gauche
+                    new Vector3f(x, y, z),
+                    new Vector3f(x + w, y, z),
+                    new Vector3f(x + w, y, z + h),
+                    new Vector3f(x, y, z + h)
             };
 
-            // Face UP (regarde vers +Y, normale = [0, 1, 0])
-            // Vue depuis +Y : CCW = avant-gauche, arrière-gauche, arrière-droite, avant-droite
             case UP -> new Vector3f[]{
-                    new Vector3f(x, y + BLOCK_SIZE, z),            // avant-gauche
-                    new Vector3f(x, y + BLOCK_SIZE, z + h),        // arrière-gauche
-                    new Vector3f(x + w, y + BLOCK_SIZE, z + h),    // arrière-droite
-                    new Vector3f(x + w, y + BLOCK_SIZE, z)         // avant-droite
+                    new Vector3f(x, y + BLOCK_SIZE, z),
+                    new Vector3f(x, y + BLOCK_SIZE, z + h),
+                    new Vector3f(x + w, y + BLOCK_SIZE, z + h),
+                    new Vector3f(x + w, y + BLOCK_SIZE, z)
             };
         };
     }
 
     // ==================== Utilitaires ====================
 
-    /**
-     * Convertit une liste de Float en float[].
-     */
     private float[] toFloatArray(List<Float> list) {
         float[] array = new float[list.size()];
         for (int i = 0; i < list.size(); i++) {
@@ -619,9 +438,6 @@ public class ChunkMesh {
         return array;
     }
 
-    /**
-     * Convertit une liste d'Integer en int[].
-     */
     private int[] toIntArray(List<Integer> list) {
         int[] array = new int[list.size()];
         for (int i = 0; i < list.size(); i++) {
@@ -632,37 +448,30 @@ public class ChunkMesh {
 
     // ==================== Classe interne MaskEntry ====================
 
-    /**
-     * Représente une entrée dans le masque 2D.
-     */
     private static class MaskEntry {
         final BlockType blockType;
-        final Texture texture;
+        final int textureIndex;
         final Vector3f tintColor;
         final BlockType.BlockFace blockFace;
 
-        MaskEntry(BlockType blockType, Texture texture, Vector3f tintColor, BlockType.BlockFace blockFace) {
+        MaskEntry(BlockType blockType, int textureIndex,
+                  Vector3f tintColor, BlockType.BlockFace blockFace) {
             this.blockType = blockType;
-            this.texture = texture;
+            this.textureIndex = textureIndex;
             this.tintColor = tintColor;
             this.blockFace = blockFace;
         }
 
-        /**
-         * Vérifie si deux entrées peuvent être fusionnées (même type de bloc ET même face).
-         */
         boolean canMergeWith(MaskEntry other) {
             if (other == null) return false;
             return this.blockType.id().equals(other.blockType.id())
-                    && this.blockFace == other.blockFace;
+                    && this.blockFace == other.blockFace
+                    && this.textureIndex == other.textureIndex;
         }
     }
 
     // ==================== Enum FaceDirection ====================
 
-    /**
-     * Direction d'une face de bloc.
-     */
     private enum FaceDirection {
         NORTH(0, 0, -1),
         SOUTH(0, 0, 1),
@@ -681,16 +490,8 @@ public class ChunkMesh {
             this.offsetZ = offsetZ;
         }
 
-        public int getOffsetX() {
-            return offsetX;
-        }
-
-        public int getOffsetY() {
-            return offsetY;
-        }
-
-        public int getOffsetZ() {
-            return offsetZ;
-        }
+        public int getOffsetX() { return offsetX; }
+        public int getOffsetY() { return offsetY; }
+        public int getOffsetZ() { return offsetZ; }
     }
 }
