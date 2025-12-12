@@ -1,6 +1,9 @@
-package org.almostcraft.render;
+package org.almostcraft.render.chunk;
 
 import org.almostcraft.camera.Camera;
+import org.almostcraft.render.core.Mesh;
+import org.almostcraft.render.core.Shader;
+import org.almostcraft.render.texture.TextureArray;
 import org.almostcraft.world.ChunkCoordinate;
 import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;

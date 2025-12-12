@@ -1,6 +1,6 @@
 package org.almostcraft.world;
 
-import org.almostcraft.render.ChunkRenderer;
+import org.almostcraft.render.chunk.ChunkRenderer;
 import org.almostcraft.world.chunk.Chunk;
 import org.joml.Vector3f;
 import org.slf4j.Logger;

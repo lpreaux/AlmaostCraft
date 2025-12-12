@@ -1,4 +1,4 @@
-package org.almostcraft.render;
+package org.almostcraft.render.core;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

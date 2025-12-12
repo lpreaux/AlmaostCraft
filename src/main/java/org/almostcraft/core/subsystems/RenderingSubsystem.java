@@ -1,9 +1,9 @@
 package org.almostcraft.core.subsystems;
 
 import org.almostcraft.camera.Camera;
-import org.almostcraft.render.ChunkRenderer;
-import org.almostcraft.render.Shader;
-import org.almostcraft.render.TextureArray;
+import org.almostcraft.render.chunk.ChunkRenderer;
+import org.almostcraft.render.core.Shader;
+import org.almostcraft.render.texture.TextureArray;
 import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
 import org.slf4j.Logger;

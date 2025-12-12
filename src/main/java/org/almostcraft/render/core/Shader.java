@@ -1,4 +1,4 @@
-package org.almostcraft.render;
+package org.almostcraft.render.core;
 
 import org.joml.Matrix4f;
 import org.joml.Vector3f;

@@ -1,6 +1,7 @@
 package org.almostcraft.render;
 
 import org.almostcraft.core.Window;
+import org.almostcraft.render.core.Shader;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
