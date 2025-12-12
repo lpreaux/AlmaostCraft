@@ -1,6 +1,6 @@
 package org.almostcraft.world.utils;
 
-import org.almostcraft.world.ChunkCoordinate;
+import org.almostcraft.world.chunk.ChunkCoordinate;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;

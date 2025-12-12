@@ -1,4 +1,4 @@
-package org.almostcraft.world;
+package org.almostcraft.world.chunk;
 
 /**
  * Représente les coordonnées d'un chunk dans le monde.

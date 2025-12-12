@@ -2,6 +2,7 @@ package org.almostcraft.world;
 
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.Blocks;
+import org.almostcraft.world.chunk.ChunkLoader;
 import org.almostcraft.world.generation.FlatTerrainGenerator;
 import org.joml.Vector3f;
 import org.junit.jupiter.api.BeforeEach;

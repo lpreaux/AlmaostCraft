@@ -4,7 +4,7 @@ import org.almostcraft.camera.Camera;
 import org.almostcraft.render.core.Mesh;
 import org.almostcraft.render.core.Shader;
 import org.almostcraft.render.texture.TextureArray;
-import org.almostcraft.world.ChunkCoordinate;
+import org.almostcraft.world.chunk.ChunkCoordinate;
 import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.chunk.Chunk;

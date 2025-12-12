@@ -1,6 +1,6 @@
 package org.almostcraft.world.utils;
 
-import org.almostcraft.world.ChunkCoordinate;
+import org.almostcraft.world.chunk.ChunkCoordinate;
 import org.almostcraft.world.chunk.Chunk;
 
 /**

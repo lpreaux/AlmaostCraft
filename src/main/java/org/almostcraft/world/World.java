@@ -3,6 +3,7 @@ package org.almostcraft.world;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.BlockType;
 import org.almostcraft.world.chunk.Chunk;
+import org.almostcraft.world.chunk.ChunkCoordinate;
 import org.almostcraft.world.generation.TerrainGenerator;
 import org.almostcraft.world.utils.CoordinateUtil;
 import org.slf4j.Logger;

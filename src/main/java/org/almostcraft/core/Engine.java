@@ -1,10 +1,11 @@
 package org.almostcraft.core;
 
+import org.almostcraft.core.stats.GameStats;
 import org.almostcraft.core.subsystems.CameraSubsystem;
 import org.almostcraft.core.subsystems.RenderingSubsystem;
 import org.almostcraft.core.subsystems.WorldSubsystem;
 import org.almostcraft.input.InputManager;
-import org.almostcraft.world.ChunkLoader;
+import org.almostcraft.world.chunk.ChunkLoader;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.opengl.GL;
 import org.slf4j.Logger;
@@ -21,7 +22,8 @@ import static org.lwjgl.opengl.GL11.*;
  * Moteur principal du jeu AlmostCraft.
  * <p>
  * Cette classe orchestre le cycle de vie de l'application en coordonnant
- * les différents subsystems (World, Camera, Rendering).
+ * les différents subsystems (World, Camera, Rendering) et en collectant
+ * les statistiques de performance.
  * </p>
  * <p>
  * Architecture :
@@ -29,14 +31,16 @@ import static org.lwjgl.opengl.GL11.*;
  *   <li>Core : GLFW, Window, Input</li>
  *   <li>Subsystems : World, Camera, Rendering</li>
  *   <li>ChunkLoader : Pont entre World, Camera et Rendering</li>
+ *   <li>GameStats : Collection et affichage des statistiques</li>
  * </ul>
  * </p>
  *
  * @author Lucas Préaux
- * @version 2.0
+ * @version 3.0 (avec GameStats)
  * @see WorldSubsystem
  * @see CameraSubsystem
  * @see RenderingSubsystem
+ * @see GameStats
  */
 public class Engine {
 
@@ -67,10 +71,9 @@ public class Engine {
 
     private ChunkLoader chunkLoader;
 
-    // ==================== Stats ====================
+    // ==================== Statistics ====================
 
-    private int frameCount = 0;
-    private double lastFpsTime = 0;
+    private GameStats gameStats;
 
     // ==================== Point d'entrée ====================
 
@@ -146,6 +149,9 @@ public class Engine {
 
         // 4. Créer le chunk loader (dépend de tous les subsystems)
         initChunkLoader();
+
+        // 5. Initialiser les statistiques
+        initStats();
 
         logger.info("All engine systems initialized");
     }
@@ -292,6 +298,19 @@ public class Engine {
                 worldSubsystem.getWorld().getLoadedChunkCount());
     }
 
+    /**
+     * Initialise le système de statistiques.
+     */
+    private void initStats() {
+        logger.debug("Initializing game statistics");
+
+        gameStats = new GameStats();
+        // Optionnel : activer les stats mémoire
+        // gameStats.setMemoryStatsEnabled(true);
+
+        logger.debug("Game statistics initialized");
+    }
+
     // ==================== Boucle de jeu ====================
 
     /**
@@ -301,7 +320,6 @@ public class Engine {
         logger.info("Entering game loop");
 
         double lastTime = glfwGetTime();
-        lastFpsTime = lastTime;
 
         while (!window.shouldClose()) {
             double currentTime = glfwGetTime();
@@ -320,14 +338,14 @@ public class Engine {
             // Mise à jour de la logique
             update(deltaTime);
 
+            // Mise à jour des statistiques
+            updateStats(currentTime);
+
             // Rendu
             render();
 
             // Affichage
             window.swapBuffers();
-
-            // Stats
-            updateStats(currentTime);
         }
 
         logger.info("Game loop ended");
@@ -353,6 +371,13 @@ public class Engine {
                 logger.debug("Cursor captured");
             }
         }
+
+        // F3 pour toggle memory stats (optionnel)
+        if (inputManager.isKeyJustPressed(GLFW_KEY_F3)) {
+            boolean enabled = !gameStats.isMemoryStatsEnabled();
+            gameStats.setMemoryStatsEnabled(enabled);
+            logger.info("Memory stats {}", enabled ? "enabled" : "disabled");
+        }
     }
 
     /**
@@ -371,6 +396,25 @@ public class Engine {
     }
 
     /**
+     * Met à jour les statistiques du jeu.
+     *
+     * @param currentTime le temps actuel en secondes
+     */
+    private void updateStats(double currentTime) {
+        gameStats.update(
+                currentTime,
+                worldSubsystem.getWorld(),
+                renderingSubsystem.getChunkRenderer(),
+                cameraSubsystem.getCamera()
+        );
+
+        // Logger les stats si un nouveau calcul a été fait
+        if (gameStats.shouldLog()) {
+            logger.info(gameStats.getFormattedStats());
+        }
+    }
+
+    /**
      * Effectue le rendu de la frame actuelle.
      */
     private void render() {
@@ -379,29 +423,6 @@ public class Engine {
 
         // Rendre via le subsystem de rendering
         renderingSubsystem.render(cameraSubsystem.getCamera());
-    }
-
-    /**
-     * Met à jour et affiche les statistiques (FPS, chunks, etc.).
-     */
-    private void updateStats(double currentTime) {
-        frameCount++;
-
-        if (currentTime - lastFpsTime >= 1.0) {
-            logger.info("FPS: {}, Chunks: {}, Meshes: {}, Triangles: {}K, Pos: ({:.1f}, {:.1f}, {:.1f}), Direction: {}",
-                    frameCount,
-                    worldSubsystem.getWorld().getLoadedChunkCount(),
-                    renderingSubsystem.getChunkRenderer().getCachedMeshCount(),
-                    renderingSubsystem.getChunkRenderer().getTotalTriangleCount() / 1000,
-                    cameraSubsystem.getCamera().getPosition().x,
-                    cameraSubsystem.getCamera().getPosition().y,
-                    cameraSubsystem.getCamera().getPosition().z,
-                    cameraSubsystem.getCamera().getCardinalDirection()
-            );
-
-            frameCount = 0;
-            lastFpsTime = currentTime;
-        }
     }
 
     // ==================== Nettoyage ====================
@@ -438,5 +459,19 @@ public class Engine {
         }
 
         logger.debug("Cleanup complete");
+    }
+
+    // ==================== Getters ====================
+
+    /**
+     * Retourne les statistiques du jeu.
+     * <p>
+     * Utile pour les overlays UI ou le débogage.
+     * </p>
+     *
+     * @return le gestionnaire de statistiques
+     */
+    public GameStats getGameStats() {
+        return gameStats;
     }
 }

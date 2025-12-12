@@ -1,6 +1,6 @@
 package org.almostcraft.core.subsystems;
 
-import org.almostcraft.world.ChunkLoader;
+import org.almostcraft.world.chunk.ChunkLoader;
 import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.block.Blocks;
