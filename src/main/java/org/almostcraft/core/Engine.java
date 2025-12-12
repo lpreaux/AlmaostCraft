@@ -1,18 +1,10 @@
 package org.almostcraft.core;
 
-import org.almostcraft.camera.Camera;
-import org.almostcraft.camera.CameraController;
+import org.almostcraft.core.subsystems.CameraSubsystem;
+import org.almostcraft.core.subsystems.RenderingSubsystem;
+import org.almostcraft.core.subsystems.WorldSubsystem;
 import org.almostcraft.input.InputManager;
-import org.almostcraft.render.ChunkRenderer;
-import org.almostcraft.render.Shader;
-import org.almostcraft.render.TextureArray;
 import org.almostcraft.world.ChunkLoader;
-import org.almostcraft.world.World;
-import org.almostcraft.world.block.BlockRegistry;
-import org.almostcraft.world.block.Blocks;
-import org.almostcraft.world.generation.SimplexTerrainGenerator;
-import org.almostcraft.world.generation.TerrainGenerator;
-import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFWErrorCallback;
 import org.lwjgl.opengl.GL;
 import org.slf4j.Logger;
@@ -28,125 +20,64 @@ import static org.lwjgl.opengl.GL11.*;
 /**
  * Moteur principal du jeu AlmostCraft.
  * <p>
- * Cette classe gère le cycle de vie complet de l'application :
- * <ul>
- *   <li>Initialisation de GLFW et OpenGL</li>
- *   <li>Création de la fenêtre et des systèmes d'entrée</li>
- *   <li>Boucle de jeu (game loop)</li>
- *   <li>Nettoyage des ressources</li>
- * </ul>
+ * Cette classe orchestre le cycle de vie de l'application en coordonnant
+ * les différents subsystems (World, Camera, Rendering).
  * </p>
  * <p>
- * Le moteur suit une architecture classique avec séparation claire entre
- * l'initialisation, la boucle de jeu (update/render) et le nettoyage.
+ * Architecture :
+ * <ul>
+ *   <li>Core : GLFW, Window, Input</li>
+ *   <li>Subsystems : World, Camera, Rendering</li>
+ *   <li>ChunkLoader : Pont entre World, Camera et Rendering</li>
+ * </ul>
  * </p>
  *
  * @author Lucas Préaux
- * @version 1.0
- * @see Window
- * @see InputManager
+ * @version 2.0
+ * @see WorldSubsystem
+ * @see CameraSubsystem
+ * @see RenderingSubsystem
  */
 public class Engine {
 
     // ==================== Logger ====================
 
-    /**
-     * Logger SLF4J pour cette classe.
-     */
     private static final Logger logger = LoggerFactory.getLogger(Engine.class);
 
     // ==================== Constantes ====================
 
-    /**
-     * Largeur par défaut de la fenêtre en pixels.
-     */
     private static final int DEFAULT_WINDOW_WIDTH = 1280;
-
-    /**
-     * Hauteur par défaut de la fenêtre en pixels.
-     */
     private static final int DEFAULT_WINDOW_HEIGHT = 720;
-
-    /**
-     * Titre de la fenêtre.
-     */
     private static final String WINDOW_TITLE = "AlmostCraft";
-
-    /**
-     * Champ de vision (Field of View) de la caméra en degrés.
-     */
-    private static final float FOV = 70.0f;
-
-    /**
-     * Distance du plan de clipping proche.
-     */
-    private static final float Z_NEAR = 0.1f;
-
-    /**
-     * Distance du plan de clipping lointain.
-     */
-    private static final float Z_FAR = 1000.0f;
-
-    /**
-     * Chemin vers le fichier de configuration.
-     */
     private static final String CONFIG_FILE = "/application.properties";
+    private static final int DEFAULT_RENDER_DISTANCE = 8;
 
-    // ==================== Attributs ====================
+    // ==================== Core Components ====================
 
-    /**
-     * Fenêtre principale de l'application.
-     */
     private Window window;
-
-    /**
-     * Gestionnaire des entrées utilisateur (clavier et souris).
-     */
     private InputManager inputManager;
 
-    private BlockRegistry blockRegistry;
+    // ==================== Subsystems ====================
 
-    /**
-     * Le monde du jeu.
-     */
-    private World world;
+    private WorldSubsystem worldSubsystem;
+    private CameraSubsystem cameraSubsystem;
+    private RenderingSubsystem renderingSubsystem;
 
-    /**
-     * Gestionnaire de chargement des chunks.
-     */
+    // ==================== Chunk Loading ====================
+
     private ChunkLoader chunkLoader;
 
-    /**
-     * Caméra FPS du joueur.
-     */
-    private Camera camera;
+    // ==================== Stats ====================
 
-    /**
-     * Contrôleur de la caméra (gère les inputs).
-     */
-    private CameraController cameraController;
-
-    private TextureArray textureArray;
-
-
-    /**
-     * Shader pour le rendu des chunks.
-     */
-    private Shader shader;
-
-    /**
-     * Renderer pour les chunks.
-     */
-    private ChunkRenderer chunkRenderer;
-
-    private long lastStatsLog = 0;
+    private int frameCount = 0;
+    private double lastFpsTime = 0;
 
     // ==================== Point d'entrée ====================
 
     /**
      * Démarre le moteur de jeu.
      * <p>
-     * Cette méthode orchestre le cycle de vie complet de l'application :
+     * Cycle de vie complet :
      * <ol>
      *   <li>Charge la configuration</li>
      *   <li>Initialise les systèmes</li>
@@ -172,12 +103,7 @@ public class Engine {
     // ==================== Initialisation ====================
 
     /**
-     * Affiche les informations de démarrage dans la console.
-     * <p>
-     * Charge et affiche la version de l'application depuis le fichier de configuration.
-     * </p>
-     *
-     * @throws IOException si le fichier de configuration ne peut pas être lu
+     * Affiche les informations de démarrage.
      */
     private void logStartup() throws IOException {
         Properties props = loadProperties();
@@ -186,11 +112,7 @@ public class Engine {
     }
 
     /**
-     * Charge les propriétés de configuration depuis le classpath.
-     *
-     * @return les propriétés chargées
-     * @throws IOException           si le fichier ne peut pas être lu
-     * @throws IllegalStateException si le fichier de configuration n'existe pas
+     * Charge les propriétés de configuration.
      */
     private Properties loadProperties() throws IOException {
         Properties props = new Properties();
@@ -209,38 +131,48 @@ public class Engine {
 
     /**
      * Initialise tous les systèmes du moteur.
-     * <p>
-     * Initialise dans l'ordre :
-     * <ol>
-     *   <li>Le système d'erreurs GLFW</li>
-     *   <li>La bibliothèque GLFW</li>
-     *   <li>La fenêtre principale</li>
-     *   <li>Le gestionnaire d'entrées</li>
-     * </ol>
-     * </p>
-     *
-     * @throws IllegalStateException si l'initialisation de GLFW échoue
      */
     private void init() {
         logger.info("Initializing engine systems...");
-        initGLFW();
-        initWindow();
-        initOpenGL();
-        initInput();
-        initBlockRegistry();
-        initTextureArray();
-        initWorld();
-        initCamera();
-        initShader();
-        initChunkRenderer();
+
+        // 1. Systèmes de base (GLFW, Window, OpenGL, Input)
+        initCore();
+
+        // 2. Créer les subsystems
+        createSubsystems();
+
+        // 3. Initialiser les subsystems
+        initializeSubsystems();
+
+        // 4. Créer le chunk loader (dépend de tous les subsystems)
         initChunkLoader();
+
         logger.info("All engine systems initialized");
     }
 
     /**
+     * Initialise les systèmes de base (GLFW, Window, OpenGL, Input).
+     */
+    private void initCore() {
+        logger.debug("Initializing core systems");
+
+        // GLFW
+        initGLFW();
+
+        // Window
+        initWindow();
+
+        // OpenGL
+        initOpenGL();
+
+        // Input
+        initInput();
+
+        logger.debug("Core systems initialized");
+    }
+
+    /**
      * Initialise GLFW et configure le callback d'erreur.
-     *
-     * @throws IllegalStateException si GLFW ne peut pas être initialisé
      */
     private void initGLFW() {
         logger.debug("Configuring GLFW error callback");
@@ -256,21 +188,22 @@ public class Engine {
 
     /**
      * Crée et configure la fenêtre principale.
-     * <p>
-     * Configure la fenêtre avec :
-     * <ul>
-     *   <li>Centrage sur l'écran</li>
-     *   <li>Contexte OpenGL actif</li>
-     *   <li>VSync activé</li>
-     * </ul>
-     * </p>
      */
     private void initWindow() {
         logger.info("Creating window ({}x{})", DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+
         window = new Window(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, WINDOW_TITLE);
         window.centerOnScreen();
         window.makeContextCurrent();
         window.enableVsync();
+
+        // Callback de resize (sera utilisé après l'initialisation de CameraSubsystem)
+        glfwSetFramebufferSizeCallback(window.getHandle(), (win, w, h) -> {
+            if (cameraSubsystem != null) {
+                cameraSubsystem.handleWindowResize(w, h);
+            }
+        });
+
         window.show();
         logger.debug("Window created with handle: {}", window.getHandle());
     }
@@ -303,175 +236,77 @@ public class Engine {
     }
 
     /**
-     * Initialise le registre de blocs et enregistre tous les blocs vanilla.
+     * Crée tous les subsystems.
      */
-    private void initBlockRegistry() {
-        logger.info("Initializing block registry");
+    private void createSubsystems() {
+        logger.debug("Creating subsystems");
 
-        blockRegistry = new BlockRegistry();
+        // World subsystem (pas de dépendances externes)
+        worldSubsystem = new WorldSubsystem();
 
-        // Enregistrer tous les blocs de base
-        Blocks.register(blockRegistry);
+        // Camera subsystem (dépend de InputManager et Window)
+        cameraSubsystem = new CameraSubsystem(inputManager, window);
 
-        // Figer le registre (plus d'enregistrements autorisés)
-        blockRegistry.freeze();
+        // Rendering subsystem (dépend de World et BlockRegistry)
+        renderingSubsystem = new RenderingSubsystem(
+                worldSubsystem.getWorld(),
+                worldSubsystem.getBlockRegistry()
+        );
 
-        logger.info("Block registry initialized with {} blocks", blockRegistry.size());
-    }
-
-
-    private void initTextureArray() {
-        logger.info("Initializing texture array");
-
-        try {
-            textureArray = new TextureArray();
-
-            // Ajouter toutes les textures (la première détecte la taille)
-            // textureAtlas.addTexture("textures/blocks/air.png");
-            textureArray.addTexture("textures/blocks/stone.png");
-            textureArray.addTexture("textures/blocks/dirt.png");
-            textureArray.addTexture("textures/blocks/cobblestone.png");
-            textureArray.addTexture("textures/blocks/sand.png");
-            textureArray.addTexture("textures/blocks/oak_planks.png");
-            textureArray.addTexture("textures/blocks/glass.png");
-
-            // Textures pour le grass_block
-            textureArray.addTexture("textures/blocks/grass_block_top.png");
-            textureArray.addTexture("textures/blocks/grass_block_side.png");
-
-            // Construire l'atlas (calcule la grille et combine)
-            textureArray.build();
-
-        } catch (IOException e) {
-            logger.error("Failed to initialize texture array", e);
-            throw new RuntimeException("Failed to initialize texture array", e);
-        }
+        logger.debug("Subsystems created");
     }
 
     /**
-     * Initialise le monde du jeu avec son générateur de terrain.
+     * Initialise tous les subsystems dans l'ordre.
      */
-    private void initWorld() {
-        logger.info("Initializing world");
+    private void initializeSubsystems() {
+        logger.info("Initializing subsystems");
 
-        // Créer le générateur de terrain
-        // TerrainGenerator generator = new FlatTerrainGenerator(blockRegistry);
-        TerrainGenerator generator = new SimplexTerrainGenerator(blockRegistry);
-        // TerrainGenerator generator = new SimplexTerrainGenerator(blockRegistry, 12345, 0.007f, 40, 220, 7);
+        worldSubsystem.initialize();
+        cameraSubsystem.initialize();
+        renderingSubsystem.initialize();
 
-        // Créer le monde
-        world = new World(generator, blockRegistry);
-
-        logger.info("World initialized with SimplexTerrainGenerator");
-    }
-
-    /**
-     * Initialise la caméra et son contrôleur.
-     * <p>
-     * La caméra est placée à une position initiale (8, 70, 8) pour voir la scène,
-     * et la matrice de projection est configurée avec le FOV et l'aspect ratio.
-     * </p>
-     */
-    private void initCamera() {
-        logger.debug("Initializing camera");
-
-        // Position de spawn initiale
-        camera = new Camera(new Vector3f(8, 70, 8), 0, 0);
-
-        // Configurer la matrice de projection
-        float aspectRatio = (float) window.getWidth() / window.getHeight();
-        camera.updateProjectionMatrix(FOV, aspectRatio, Z_NEAR, Z_FAR);
-
-        // Créer le contrôleur de caméra
-        cameraController = new CameraController(camera, inputManager);
-        cameraController.setMoveSpeed(20.0f);
-
-        logger.debug("Camera initialized at position {}", camera.getPosition());
+        logger.info("Subsystems initialized");
     }
 
     /**
      * Initialise le système de chargement des chunks.
+     * <p>
+     * Le ChunkLoader fait le pont entre World, Camera et Rendering.
+     * Il doit être créé après l'initialisation de tous les subsystems.
+     * </p>
      */
     private void initChunkLoader() {
         logger.info("Initializing chunk loader");
 
-        // Créer le chunk loader avec render distance de 8
-        chunkLoader = new ChunkLoader(world, 8, chunkRenderer);
+        chunkLoader = new ChunkLoader(
+                worldSubsystem.getWorld(),
+                DEFAULT_RENDER_DISTANCE,
+                renderingSubsystem.getChunkRenderer()
+        );
 
         // Charger les chunks initiaux autour de la position de spawn
-        Vector3f spawnPosition = camera.getPosition();
-        chunkLoader.loadInitialChunks(spawnPosition);
+        chunkLoader.loadInitialChunks(cameraSubsystem.getCamera().getPosition());
 
         logger.info("Chunk loader initialized with {} chunks loaded",
-                world.getLoadedChunkCount());
+                worldSubsystem.getWorld().getLoadedChunkCount());
     }
 
-    /**
-     * Initialise le shader de rendu.
-     */
-    private void initShader() {
-        logger.info("Initializing shader");
-        shader = new Shader("shaders/block.vert", "shaders/block.frag");
-        logger.info("Shader initialized");
-    }
-
-    /**
-     * Initialise le renderer de chunks.
-     */
-    private void initChunkRenderer() {
-        logger.info("Initializing chunk renderer");
-        chunkRenderer = new ChunkRenderer(world, blockRegistry, shader, textureArray);
-        logger.info("Chunk renderer initialized");
-    }
-
-// ==================== Boucle de jeu ====================
+    // ==================== Boucle de jeu ====================
 
     /**
      * Boucle principale du jeu.
-     * <p>
-     * Exécute la boucle de jeu jusqu'à ce que la fenêtre doive se fermer.
-     * Chaque itération :
-     * <ol>
-     *   <li>Calcule le deltaTime</li>
-     *   <li>Met à jour les entrées</li>
-     *   <li>Traite les événements GLFW</li>
-     *   <li>Gère les inputs globaux (ESC pour quitter)</li>
-     *   <li>Met à jour la caméra</li>
-     *   <li>Effectue le rendu</li>
-     *   <li>Échange les buffers</li>
-     * </ol>
-     * </p>
      */
     private void loop() {
         logger.info("Entering game loop");
 
         double lastTime = glfwGetTime();
-        int frameCount = 0;
-        double lastFpsTime = lastTime;
+        lastFpsTime = lastTime;
 
-        // Boucle principale
         while (!window.shouldClose()) {
             double currentTime = glfwGetTime();
             float deltaTime = (float) (currentTime - lastTime);
             lastTime = currentTime;
-
-            // FPS counter
-            frameCount++;
-            if (currentTime - lastFpsTime >= 1.0) {
-                Camera.CardinalDirection direction = camera.getCardinalDirection();
-                logger.info("FPS: {}, Chunks: {}, Meshes: {}, Triangles: {}K, Pos: ({:.1f}, {:.1f}, {:.1f}), Direction: {}",
-                        frameCount,
-                        world.getLoadedChunkCount(),
-                        chunkRenderer.getCachedMeshCount(),
-                        chunkRenderer.getTotalTriangleCount() / 1000,
-                        camera.getPosition().x,
-                        camera.getPosition().y,
-                        camera.getPosition().z,
-                        direction
-                );
-                frameCount = 0;
-                lastFpsTime = currentTime;
-            }
 
             // Mise à jour des entrées
             inputManager.update();
@@ -490,13 +325,16 @@ public class Engine {
 
             // Affichage
             window.swapBuffers();
+
+            // Stats
+            updateStats(currentTime);
         }
 
         logger.info("Game loop ended");
     }
 
     /**
-     * Gère les entrées utilisateur.
+     * Gère les entrées utilisateur globales.
      */
     private void handleInput() {
         // ESC pour quitter
@@ -523,15 +361,13 @@ public class Engine {
      * @param deltaTime le temps écoulé depuis la dernière frame en secondes
      */
     private void update(float deltaTime) {
-        // Mise à jour de la caméra
-        cameraController.update(deltaTime);
-        camera.updateViewMatrix();
+        // Mise à jour des subsystems
+        cameraSubsystem.update(deltaTime);
+        worldSubsystem.update(deltaTime);
+        renderingSubsystem.update(deltaTime);
 
         // Mise à jour du chargement des chunks
-        chunkLoader.update(camera.getPosition());
-
-        // Mise à jour du renderer
-        chunkRenderer.update();
+        chunkLoader.update(cameraSubsystem.getCamera().getPosition());
     }
 
     /**
@@ -541,32 +377,61 @@ public class Engine {
         // Nettoyage du framebuffer
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Rendre tous les chunks
-        chunkRenderer.render(camera);
+        // Rendre via le subsystem de rendering
+        renderingSubsystem.render(cameraSubsystem.getCamera());
     }
 
-// ==================== Nettoyage ====================
+    /**
+     * Met à jour et affiche les statistiques (FPS, chunks, etc.).
+     */
+    private void updateStats(double currentTime) {
+        frameCount++;
+
+        if (currentTime - lastFpsTime >= 1.0) {
+            logger.info("FPS: {}, Chunks: {}, Meshes: {}, Triangles: {}K, Pos: ({:.1f}, {:.1f}, {:.1f}), Direction: {}",
+                    frameCount,
+                    worldSubsystem.getWorld().getLoadedChunkCount(),
+                    renderingSubsystem.getChunkRenderer().getCachedMeshCount(),
+                    renderingSubsystem.getChunkRenderer().getTotalTriangleCount() / 1000,
+                    cameraSubsystem.getCamera().getPosition().x,
+                    cameraSubsystem.getCamera().getPosition().y,
+                    cameraSubsystem.getCamera().getPosition().z,
+                    cameraSubsystem.getCamera().getCardinalDirection()
+            );
+
+            frameCount = 0;
+            lastFpsTime = currentTime;
+        }
+    }
+
+    // ==================== Nettoyage ====================
 
     /**
      * Nettoie toutes les ressources avant la fermeture de l'application.
      */
     private void cleanup() {
-        logger.debug("Cleaning up chunk renderer");
-        chunkRenderer.cleanup();
+        logger.debug("Cleaning up engine systems");
 
-        logger.debug("Cleaning up texture array");
-        textureArray.cleanup();
+        // Nettoyer les subsystems dans l'ordre inverse de création
+        if (renderingSubsystem != null) {
+            renderingSubsystem.cleanup();
+        }
 
-        logger.debug("Cleaning up shader");
-        shader.cleanup();
+        if (cameraSubsystem != null) {
+            cameraSubsystem.cleanup();
+        }
 
-        logger.debug("Destroying window");
-        window.destroy();
+        if (worldSubsystem != null) {
+            worldSubsystem.cleanup();
+        }
 
-        logger.debug("Terminating GLFW");
+        // Nettoyer les systèmes de base
+        if (window != null) {
+            window.destroy();
+        }
+
         glfwTerminate();
 
-        logger.debug("Freeing GLFW error callback");
         GLFWErrorCallback errorCallback = glfwSetErrorCallback(null);
         if (errorCallback != null) {
             errorCallback.free();

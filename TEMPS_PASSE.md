@@ -10,5 +10,6 @@
 
 ## Phase 3
 5 heures - Mar 9 dec
-Mer 10 dec
-- 20h30 à ...
+
+6 heures - Mer 10 dec
+- 20h30 à 2h30
