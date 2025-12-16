@@ -1,6 +1,7 @@
-package org.almostcraft.render.chunk.frustum;
+package org.almostcraft.graphics.culling;
 
 import org.joml.Matrix4f;
+import org.joml.Vector3f;
 import org.joml.Vector4f;
 
 /**
@@ -8,23 +9,24 @@ import org.joml.Vector4f;
  * <p>
  * Le frustum est défini par 6 plans (gauche, droite, haut, bas, proche, loin)
  * extraits de la matrice view-projection de la caméra. Il permet de tester
- * efficacement si des objets (chunks) sont visibles à l'écran.
+ * efficacement si des objets (chunks, bounding boxes) sont visibles à l'écran.
  * </p>
  * <p>
  * <strong>Utilisation :</strong>
  * <pre>
  * Frustum frustum = new Frustum();
- * frustum.updateFrustum(camera.getViewProjectionMatrix());
+ * frustum.update(camera.getViewProjectionMatrix());
  *
- * if (frustum.isChunkVisible(chunkX, chunkZ)) {
+ * if (frustum.intersects(chunk.getBoundingBox())) {
  *     // Rendre le chunk
  * }
  * </pre>
  * </p>
  *
  * @author Lucas Préaux
- * @version 1.0
+ * @version 1.1
  * @see Plane
+ * @see BoundingBox
  */
 public class Frustum {
 
@@ -51,7 +53,7 @@ public class Frustum {
     // ==================== Attributs ====================
 
     /** Les 6 plans définissant le frustum */
-    private final Plane[] planes = new Plane[6];
+    private final org.almostcraft.graphics.culling.Plane[] planes = new org.almostcraft.graphics.culling.Plane[6];
 
     /** Vecteurs temporaires pour éviter les allocations répétées */
     private final Vector4f[] rows = new Vector4f[4];
@@ -61,7 +63,7 @@ public class Frustum {
     /**
      * Crée un nouveau frustum.
      * <p>
-     * Le frustum doit être mis à jour via {@link #updateFrustum(Matrix4f)}
+     * Le frustum doit être mis à jour via {@link #update(Matrix4f)}
      * avant toute utilisation.
      * </p>
      */
@@ -87,7 +89,7 @@ public class Frustum {
      * @param viewProjectionMatrix la matrice view-projection combinée (non null)
      * @throws NullPointerException si viewProjectionMatrix est null
      */
-    public void updateFrustum(Matrix4f viewProjectionMatrix) {
+    public void update(Matrix4f viewProjectionMatrix) {
         // Extraire les 4 lignes de la matrice VP
         for (int i = 0; i < 4; i++) {
             viewProjectionMatrix.getRow(i, rows[i]);
@@ -146,6 +148,17 @@ public class Frustum {
     }
 
     /**
+     * Alias pour {@link #update(Matrix4f)} pour rétrocompatibilité.
+     *
+     * @param viewProjectionMatrix la matrice view-projection combinée
+     * @deprecated Utilisez {@link #update(Matrix4f)} à la place
+     */
+    @Deprecated
+    public void updateFrustum(Matrix4f viewProjectionMatrix) {
+        update(viewProjectionMatrix);
+    }
+
+    /**
      * Crée un plan normalisé à partir de ses coefficients.
      *
      * @param a coefficient x de la normale
@@ -154,11 +167,28 @@ public class Frustum {
      * @param d distance à l'origine
      * @return un nouveau plan normalisé
      */
-    private Plane createPlane(float a, float b, float c, float d) {
-        return new Plane(a, b, c, d);
+    private org.almostcraft.graphics.culling.Plane createPlane(float a, float b, float c, float d) {
+        return new org.almostcraft.graphics.culling.Plane(a, b, c, d);
     }
 
     // ==================== Tests de visibilité ====================
+
+    /**
+     * Teste si une bounding box est visible dans le frustum.
+     * <p>
+     * Cette méthode est utilisée par le CullingManager pour déterminer
+     * si un chunk doit être rendu.
+     * </p>
+     *
+     * @param boundingBox la bounding box à tester
+     * @return true si la bounding box intersecte le frustum, false sinon
+     */
+    public boolean intersects(BoundingBox boundingBox) {
+        return isBoxInFrustum(
+                boundingBox.getMinX(), boundingBox.getMinY(), boundingBox.getMinZ(),
+                boundingBox.getMaxX(), boundingBox.getMaxY(), boundingBox.getMaxZ()
+        );
+    }
 
     /**
      * Teste si une boîte englobante alignée sur les axes (AABB) est visible
@@ -182,7 +212,7 @@ public class Frustum {
             float minX, float minY, float minZ,
             float maxX, float maxY, float maxZ
     ) {
-        for (Plane plane : planes) {
+        for (org.almostcraft.graphics.culling.Plane plane : planes) {
             // Trouver le P-vertex (coin le plus proche du plan)
             // Si a > 0, le point max est plus proche, sinon c'est min
             float px = plane.a > 0 ? maxX : minX;
@@ -196,6 +226,49 @@ public class Frustum {
         }
 
         // Aucun plan n'exclut la boîte : elle est au moins partiellement visible
+        return true;
+    }
+
+    /**
+     * Teste si un point est visible dans le frustum.
+     *
+     * @param x coordonnée X du point
+     * @param y coordonnée Y du point
+     * @param z coordonnée Z du point
+     * @return true si le point est dans le frustum, false sinon
+     */
+    public boolean isPointInFrustum(float x, float y, float z) {
+        for (org.almostcraft.graphics.culling.Plane plane : planes) {
+            if (plane.distance(x, y, z) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Teste si un point est visible dans le frustum.
+     *
+     * @param point le point à tester
+     * @return true si le point est dans le frustum, false sinon
+     */
+    public boolean isPointInFrustum(Vector3f point) {
+        return isPointInFrustum(point.x, point.y, point.z);
+    }
+
+    /**
+     * Teste si une sphère est visible dans le frustum.
+     *
+     * @param center centre de la sphère
+     * @param radius rayon de la sphère
+     * @return true si la sphère intersecte le frustum, false sinon
+     */
+    public boolean isSphereInFrustum(Vector3f center, float radius) {
+        for (org.almostcraft.graphics.culling.Plane plane : planes) {
+            if (plane.distance(center) < -radius) {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -240,7 +313,34 @@ public class Frustum {
      * @return le plan à l'index spécifié
      * @throws ArrayIndexOutOfBoundsException si l'index est invalide
      */
-    public Plane getPlane(int index) {
+    public org.almostcraft.graphics.culling.Plane getPlane(int index) {
         return planes[index];
+    }
+
+    /**
+     * Récupère tous les plans du frustum.
+     *
+     * @return un tableau des 6 plans
+     */
+    public org.almostcraft.graphics.culling.Plane[] getPlanes() {
+        return planes.clone();
+    }
+
+    // ==================== Debug ====================
+
+    /**
+     * Retourne une représentation textuelle du frustum pour debug.
+     *
+     * @return une chaîne décrivant le frustum
+     */
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder("Frustum[\n");
+        String[] names = {"LEFT", "RIGHT", "BOTTOM", "TOP", "NEAR", "FAR"};
+        for (int i = 0; i < 6; i++) {
+            sb.append("  ").append(names[i]).append(": ").append(planes[i]).append("\n");
+        }
+        sb.append("]");
+        return sb.toString();
     }
 }

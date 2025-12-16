@@ -1,4 +1,6 @@
-package org.almostcraft.render.chunk.frustum;
+package org.almostcraft.graphics.culling;
+
+import org.joml.Vector3f;
 
 /**
  * Représente un plan dans l'espace 3D sous forme d'équation implicite.
@@ -21,7 +23,7 @@ package org.almostcraft.render.chunk.frustum;
  * </p>
  *
  * @author Lucas Préaux
- * @version 1.0
+ * @version 1.1
  * @see Frustum
  */
 public final class Plane {
@@ -92,6 +94,19 @@ public final class Plane {
         return a * x + b * y + c * z + d;
     }
 
+    /**
+     * Calcule la distance signée d'un point au plan.
+     * <p>
+     * Version surchargeée acceptant un Vector3f pour plus de flexibilité.
+     * </p>
+     *
+     * @param point le point à tester
+     * @return la distance signée du point au plan
+     */
+    public float distance(Vector3f point) {
+        return distance(point.x, point.y, point.z);
+    }
+
     // ==================== Méthodes utilitaires ====================
 
     /**
@@ -115,6 +130,15 @@ public final class Plane {
      */
     public float[] getNormal() {
         return new float[] { a, b, c };
+    }
+
+    /**
+     * Récupère le vecteur normal du plan sous forme de Vector3f.
+     *
+     * @return un nouveau Vector3f contenant la normale
+     */
+    public Vector3f getNormalVector() {
+        return new Vector3f(a, b, c);
     }
 
     /**

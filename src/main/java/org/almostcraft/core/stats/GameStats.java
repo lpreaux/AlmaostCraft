@@ -169,8 +169,8 @@ public class GameStats {
         }
 
         if (chunkRenderer != null) {
-            cachedMeshes = chunkRenderer.getCachedMeshCount();
-            totalTriangles = chunkRenderer.getTotalTriangleCount();
+            cachedMeshes = chunkRenderer.getTotalMeshesGenerated();
+            totalTriangles = chunkRenderer.getRenderedTriangleCount();
             dirtyChunks = chunkRenderer.getDirtyChunkCount();
         }
 

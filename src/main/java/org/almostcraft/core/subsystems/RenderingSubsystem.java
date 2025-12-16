@@ -26,7 +26,7 @@ public class RenderingSubsystem implements Subsystem {
         // Créer les objets (pas encore d'upload GPU)
         this.shader = new Shader("shaders/block.vert", "shaders/block.frag");
         this.textureArray = createTextureArray(); // Charge les images
-        this.chunkRenderer = new ChunkRenderer(world, blockRegistry, shader, textureArray);
+        this.chunkRenderer = new ChunkRenderer(world, blockRegistry, shader, textureArray, 16);
 
         logger.debug("Rendering subsystem created (not yet initialized)");
     }
@@ -48,7 +48,7 @@ public class RenderingSubsystem implements Subsystem {
     }
 
     public void render(Camera camera) {
-        chunkRenderer.render(camera);
+        chunkRenderer.render(camera, camera.getPosition());
     }
 
     @Override

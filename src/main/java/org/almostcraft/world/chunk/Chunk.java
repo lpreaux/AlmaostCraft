@@ -1,5 +1,7 @@
 package org.almostcraft.world.chunk;
 
+import org.almostcraft.graphics.culling.BoundingBox;
+import org.almostcraft.render.core.Mesh;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,7 +36,7 @@ import org.slf4j.LoggerFactory;
  * </p>
  *
  * @author Lucas Préaux
- * @version 1.0
+ * @version 1.1
  */
 public class Chunk {
 
@@ -93,6 +95,33 @@ public class Chunk {
      */
     private boolean generated;
 
+    // ==================== Attributs de rendu ====================
+
+    /**
+     * Mesh de rendu du chunk (null si pas encore généré).
+     * <p>
+     * Le mesh est régénéré lorsque le chunk est modifié et que
+     * {@link #needsMeshRebuild} est true.
+     * </p>
+     */
+    private Mesh mesh;
+
+    /**
+     * Indique si le mesh doit être reconstruit.
+     * <p>
+     * Mis à true quand le chunk ou ses voisins sont modifiés.
+     * </p>
+     */
+    private boolean needsMeshRebuild;
+
+    /**
+     * Bounding box du chunk (lazy initialization).
+     * <p>
+     * Utilisée pour le frustum culling.
+     * </p>
+     */
+    private BoundingBox boundingBox;
+
     // ==================== Constructeur ====================
 
     /**
@@ -110,6 +139,9 @@ public class Chunk {
         this.voxels = new short[TOTAL_VOXELS];
         this.modified = false;
         this.generated = false;
+        this.mesh = null;
+        this.needsMeshRebuild = true;
+        this.boundingBox = null;
 
         logger.debug("Created chunk at ({}, {}) with {} voxels", chunkX, chunkZ, TOTAL_VOXELS);
     }
@@ -148,6 +180,7 @@ public class Chunk {
         int index = toIndex(x, y, z);
         voxels[index] = (short) blockId;
         modified = true;
+        needsMeshRebuild = true;  // Marquer le mesh comme nécessitant une reconstruction
     }
 
     // ==================== Remplissage ====================
@@ -170,6 +203,7 @@ public class Chunk {
         }
 
         modified = true;
+        needsMeshRebuild = true;
         logger.debug("Filled chunk ({}, {}) with block ID {}", chunkX, chunkZ, blockId);
     }
 
@@ -201,6 +235,7 @@ public class Chunk {
         }
 
         modified = true;
+        needsMeshRebuild = true;
     }
 
     // ==================== Conversion de coordonnées ====================
@@ -315,6 +350,7 @@ public class Chunk {
      */
     public void markModified() {
         modified = true;
+        needsMeshRebuild = true;
     }
 
     /**
@@ -330,6 +366,102 @@ public class Chunk {
      */
     public boolean isGenerated() {
         return generated;
+    }
+
+    // ==================== Gestion du Mesh ====================
+
+    /**
+     * Récupère le mesh de rendu du chunk.
+     *
+     * @return le mesh, ou null si pas encore généré
+     */
+    public Mesh getMesh() {
+        return mesh;
+    }
+
+    /**
+     * Définit le mesh de rendu du chunk.
+     * <p>
+     * À appeler après la génération du mesh par le ChunkMeshBuilder.
+     * </p>
+     *
+     * @param mesh le nouveau mesh
+     */
+    public void setMesh(Mesh mesh) {
+        // Libérer l'ancien mesh si nécessaire
+        if (this.mesh != null && this.mesh != mesh) {
+            this.mesh.destroy();
+        }
+
+        this.mesh = mesh;
+        this.needsMeshRebuild = false;
+
+        logger.trace("Mesh set for chunk ({}, {})", chunkX, chunkZ);
+    }
+
+    /**
+     * Vérifie si le chunk a un mesh valide.
+     * <p>
+     * Utilisé par le CullingManager pour déterminer si le chunk
+     * peut être rendu.
+     * </p>
+     *
+     * @return true si le chunk a un mesh non-null avec des vertices
+     */
+    public boolean hasMesh() {
+        return mesh != null && mesh.getVertexCount() > 0;
+    }
+
+    /**
+     * Vérifie si le mesh doit être reconstruit.
+     *
+     * @return true si le mesh est obsolète ou inexistant
+     */
+    public boolean needsMeshRebuild() {
+        return needsMeshRebuild || mesh == null;
+    }
+
+    /**
+     * Marque le mesh comme nécessitant une reconstruction.
+     * <p>
+     * À appeler quand un chunk voisin est modifié (pour le greedy meshing).
+     * </p>
+     */
+    public void markMeshDirty() {
+        this.needsMeshRebuild = true;
+        logger.trace("Mesh marked dirty for chunk ({}, {})", chunkX, chunkZ);
+    }
+
+    /**
+     * Libère les ressources du mesh.
+     * <p>
+     * À appeler avant de supprimer le chunk ou lors du nettoyage.
+     * </p>
+     */
+    public void destroyMesh() {
+        if (mesh != null) {
+            mesh.destroy();
+            mesh = null;
+            needsMeshRebuild = true;
+            logger.trace("Mesh destroyed for chunk ({}, {})", chunkX, chunkZ);
+        }
+    }
+
+    // ==================== Bounding Box ====================
+
+    /**
+     * Récupère la bounding box du chunk (lazy initialization).
+     * <p>
+     * Utilisée par le CullingManager pour le frustum culling.
+     * </p>
+     *
+     * @return la bounding box du chunk
+     */
+    public BoundingBox getBoundingBox() {
+        if (boundingBox == null) {
+            boundingBox = BoundingBox.fromChunk(this);
+        }
+        return boundingBox;
     }
 
     // ==================== Utilitaires ====================
@@ -367,13 +499,24 @@ public class Chunk {
     }
 
     /**
+     * Nettoie toutes les ressources du chunk.
+     * <p>
+     * À appeler avant de supprimer définitivement le chunk.
+     * </p>
+     */
+    public void cleanup() {
+        destroyMesh();
+        logger.debug("Chunk ({}, {}) cleaned up", chunkX, chunkZ);
+    }
+
+    /**
      * Retourne une représentation textuelle du chunk.
      *
      * @return une chaîne décrivant le chunk
      */
     @Override
     public String toString() {
-        return String.format("Chunk[pos=(%d, %d), voxels=%d, modified=%b, nonAir=%d]",
-                chunkX, chunkZ, TOTAL_VOXELS, modified, countNonAirBlocks());
+        return String.format("Chunk[pos=(%d, %d), voxels=%d, modified=%b, nonAir=%d, hasMesh=%b]",
+                chunkX, chunkZ, TOTAL_VOXELS, modified, countNonAirBlocks(), hasMesh());
     }
 }

@@ -18,7 +18,7 @@ import static org.lwjgl.opengl.GL30.*;
  * </p>
  *
  * @author Lucas Préaux
- * @version 2.0 (avec TextureArray)
+ * @version 2.1 (ajout destroy() et fix getVertexCount())
  */
 public class Mesh {
 
@@ -50,6 +50,11 @@ public class Mesh {
     private int ebo;
 
     /**
+     * Nombre de vertices uniques dans le mesh.
+     */
+    private int vertexCount;
+
+    /**
      * Nombre d'indices à rendre (= nombre de triangles × 3).
      */
     private int indexCount;
@@ -71,6 +76,7 @@ public class Mesh {
         this.vao = 0;
         this.vbo = 0;
         this.ebo = 0;
+        this.vertexCount = 0;
         this.indexCount = 0;
         this.uploaded = false;
     }
@@ -92,18 +98,32 @@ public class Mesh {
      * <p>
      * Les indices définissent les triangles (3 indices par triangle).
      * </p>
+     * <p>
+     * <strong>Cas spécial :</strong> Si les tableaux sont vides, crée un mesh vide valide
+     * (pour les chunks entièrement composés d'air).
+     * </p>
      *
      * @param vertices tableau des vertices (format: x,y,z,texIndex,u,v,r,g,b)
      * @param indices  tableau des indices des triangles
-     * @throws IllegalArgumentException si les tableaux sont vides ou null
+     * @throws IllegalArgumentException si les tableaux sont null ou malformés
      */
     public void uploadData(float[] vertices, int[] indices) {
-        if (vertices == null || vertices.length == 0) {
-            throw new IllegalArgumentException("Vertices array cannot be null or empty");
+        if (vertices == null) {
+            throw new IllegalArgumentException("Vertices array cannot be null");
         }
-        if (indices == null || indices.length == 0) {
-            throw new IllegalArgumentException("Indices array cannot be null or empty");
+        if (indices == null) {
+            throw new IllegalArgumentException("Indices array cannot be null");
         }
+
+        // Cas spécial : mesh vide (chunk entièrement d'air)
+        if (vertices.length == 0 || indices.length == 0) {
+            logger.debug("Creating empty mesh (no geometry)");
+            this.vertexCount = 0;
+            this.indexCount = 0;
+            this.uploaded = true;
+            return;
+        }
+
         if (vertices.length % VERTEX_SIZE != 0) {
             throw new IllegalArgumentException(
                     String.format("Vertices array length must be multiple of %d " +
@@ -150,7 +170,8 @@ public class Mesh {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices, GL_STATIC_DRAW);
 
-        // Sauvegarder le nombre d'indices
+        // Sauvegarder les compteurs
+        this.vertexCount = vertices.length / VERTEX_SIZE;
         this.indexCount = indices.length;
 
         // Débinder
@@ -158,8 +179,8 @@ public class Mesh {
         glBindVertexArray(0);
 
         uploaded = true;
-        logger.debug("Mesh uploaded successfully: VAO={}, VBO={}, EBO={}, {} triangles",
-                vao, vbo, ebo, getTriangleCount());
+        logger.debug("Mesh uploaded successfully: VAO={}, VBO={}, EBO={}, {} vertices, {} triangles",
+                vao, vbo, ebo, vertexCount, getTriangleCount());
     }
 
     /**
@@ -169,12 +190,22 @@ public class Mesh {
      * @param indices  buffer des indices
      */
     public void uploadData(FloatBuffer vertices, IntBuffer indices) {
-        if (vertices == null || vertices.remaining() == 0) {
-            throw new IllegalArgumentException("Vertices buffer cannot be null or empty");
+        if (vertices == null) {
+            throw new IllegalArgumentException("Vertices buffer cannot be null");
         }
-        if (indices == null || indices.remaining() == 0) {
-            throw new IllegalArgumentException("Indices buffer cannot be null or empty");
+        if (indices == null) {
+            throw new IllegalArgumentException("Indices buffer cannot be null");
         }
+
+        // Cas spécial : mesh vide
+        if (vertices.remaining() == 0 || indices.remaining() == 0) {
+            logger.debug("Creating empty mesh (no geometry)");
+            this.vertexCount = 0;
+            this.indexCount = 0;
+            this.uploaded = true;
+            return;
+        }
+
         if (vertices.remaining() % VERTEX_SIZE != 0) {
             throw new IllegalArgumentException(
                     String.format("Vertices buffer size must be multiple of %d, got: %d",
@@ -218,14 +249,15 @@ public class Mesh {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices, GL_STATIC_DRAW);
 
+        this.vertexCount = vertices.remaining() / VERTEX_SIZE;
         this.indexCount = indices.remaining();
 
         glBindBuffer(GL_ARRAY_BUFFER, 0);
         glBindVertexArray(0);
 
         uploaded = true;
-        logger.debug("Mesh uploaded successfully (buffer variant), {} triangles",
-                getTriangleCount());
+        logger.debug("Mesh uploaded successfully (buffer variant), {} vertices, {} triangles",
+                vertexCount, getTriangleCount());
     }
 
     /**
@@ -247,12 +279,20 @@ public class Mesh {
      * À appeler dans la boucle de rendu, après avoir bindé le shader
      * et configuré les uniforms.
      * </p>
+     * <p>
+     * Si le mesh est vide (indexCount == 0), cette méthode ne fait rien.
+     * </p>
      *
      * @throws IllegalStateException si le mesh n'a pas été uploadé
      */
     public void render() {
         if (!uploaded) {
             throw new IllegalStateException("Cannot render mesh: no data has been uploaded");
+        }
+
+        // Ne rien faire si le mesh est vide
+        if (indexCount == 0) {
+            return;
         }
 
         glBindVertexArray(vao);
@@ -270,7 +310,7 @@ public class Mesh {
      * </p>
      */
     public void cleanup() {
-        if (uploaded) {
+        if (uploaded && vao != 0) {
             logger.debug("Cleaning up mesh: VAO={}, VBO={}, EBO={}", vao, vbo, ebo);
 
             glDeleteBuffers(vbo);
@@ -280,9 +320,20 @@ public class Mesh {
             vao = 0;
             vbo = 0;
             ebo = 0;
+            vertexCount = 0;
             indexCount = 0;
             uploaded = false;
         }
+    }
+
+    /**
+     * Alias pour {@link #cleanup()} pour compatibilité avec le code existant.
+     * <p>
+     * Utilisé par Chunk.setMesh() pour libérer l'ancien mesh.
+     * </p>
+     */
+    public void destroy() {
+        cleanup();
     }
 
     // ==================== Getters ====================
@@ -294,6 +345,15 @@ public class Mesh {
      */
     public int getVao() {
         return vao;
+    }
+
+    /**
+     * Retourne le nombre de vertices uniques dans le mesh.
+     *
+     * @return le nombre de vertices
+     */
+    public int getVertexCount() {
+        return vertexCount;
     }
 
     /**
@@ -324,12 +384,12 @@ public class Mesh {
     }
 
     /**
-     * Retourne le nombre de vertices dans ce mesh.
+     * Vérifie si le mesh est vide (pas de géométrie).
      *
-     * @return le nombre de vertices
+     * @return true si le mesh n'a pas de vertices
      */
-    public int getVertexCount() {
-        return indexCount; // Approximation, en réalité peut être moins
+    public boolean isEmpty() {
+        return indexCount == 0;
     }
 
     /**
@@ -339,7 +399,7 @@ public class Mesh {
      */
     @Override
     public String toString() {
-        return String.format("Mesh[vao=%d, triangles=%d, uploaded=%b]",
-                vao, getTriangleCount(), uploaded);
+        return String.format("Mesh[vao=%d, vertices=%d, triangles=%d, uploaded=%b]",
+                vao, vertexCount, getTriangleCount(), uploaded);
     }
 }

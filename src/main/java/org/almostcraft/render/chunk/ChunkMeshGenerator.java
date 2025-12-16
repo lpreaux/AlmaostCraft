@@ -21,17 +21,24 @@ import org.slf4j.LoggerFactory;
  *   <li>{@link FaceDirection} : Gestion des 6 directions des faces</li>
  * </ul>
  * </p>
+ * <p>
+ * <strong>Usage typique :</strong>
+ * <pre>{@code
+ * ChunkMeshGenerator generator = new ChunkMeshGenerator(world, blockRegistry, textureArray);
+ * Mesh mesh = generator.generateMesh(chunk);
+ * chunk.setMesh(mesh);
+ * }</pre>
+ * </p>
  *
  * @author Lucas Préaux
- * @version 6.0 (refactorisé)
+ * @version 7.0 (refactorisé pour le culling)
  */
-public class ChunkMesh {
+public class ChunkMeshGenerator {
 
-    private static final Logger logger = LoggerFactory.getLogger(ChunkMesh.class);
+    private static final Logger logger = LoggerFactory.getLogger(ChunkMeshGenerator.class);
 
     // ==================== Attributs ====================
 
-    private final Chunk chunk;
     private final World world;
     private final BlockRegistry blockRegistry;
     private final TextureArray textureArray;
@@ -39,18 +46,17 @@ public class ChunkMesh {
     // ==================== Constructeur ====================
 
     /**
-     * Crée un générateur de mesh pour un chunk.
+     * Crée un générateur de mesh réutilisable.
+     * <p>
+     * Le générateur peut être réutilisé pour générer les mesh de plusieurs chunks.
+     * </p>
      *
-     * @param chunk         le chunk à convertir en mesh
      * @param world         le monde (pour l'occlusion des voisins)
      * @param blockRegistry le registre de blocs
      * @param textureArray  l'array de textures
      * @throws IllegalArgumentException si un paramètre est null
      */
-    public ChunkMesh(Chunk chunk, World world, BlockRegistry blockRegistry, TextureArray textureArray) {
-        if (chunk == null) {
-            throw new IllegalArgumentException("Chunk cannot be null");
-        }
+    public ChunkMeshGenerator(World world, BlockRegistry blockRegistry, TextureArray textureArray) {
         if (world == null) {
             throw new IllegalArgumentException("World cannot be null");
         }
@@ -61,7 +67,6 @@ public class ChunkMesh {
             throw new IllegalArgumentException("TextureArray cannot be null");
         }
 
-        this.chunk = chunk;
         this.world = world;
         this.blockRegistry = blockRegistry;
         this.textureArray = textureArray;
@@ -70,7 +75,7 @@ public class ChunkMesh {
     // ==================== Génération du mesh ====================
 
     /**
-     * Génère le mesh optimisé pour le chunk.
+     * Génère le mesh optimisé pour un chunk.
      * <p>
      * Processus :
      * <ol>
@@ -81,9 +86,15 @@ public class ChunkMesh {
      * </ol>
      * </p>
      *
-     * @return le mesh OpenGL prêt à être rendu
+     * @param chunk le chunk à convertir en mesh
+     * @return le mesh OpenGL prêt à être rendu (peut être vide)
+     * @throws IllegalArgumentException si le chunk est null
      */
-    public Mesh build() {
+    public Mesh generateMesh(Chunk chunk) {
+        if (chunk == null) {
+            throw new IllegalArgumentException("Chunk cannot be null");
+        }
+
         long startTime = System.nanoTime();
 
         logger.debug("Building mesh for chunk ({}, {})",
@@ -100,42 +111,90 @@ public class ChunkMesh {
             mesher.meshDirection(direction, builder);
         }
 
+        // Créer le mesh (même s'il est vide)
+        Mesh mesh = new Mesh();
+
         // Vérifier si le mesh est vide
         if (builder.isEmpty()) {
             logger.debug("Chunk ({}, {}) generated empty mesh",
                     chunk.getChunkX(), chunk.getChunkZ());
-            return createEmptyMesh();
+            // Upload un mesh vide (tableaux vides)
+            mesh.uploadData(new float[0], new int[0]);
+            return mesh;
         }
 
         // Exporter vers un Mesh OpenGL
         float[] vertexArray = builder.toVertexArray();
         int[] indexArray = builder.toIndexArray();
 
-        Mesh mesh = new Mesh();
         mesh.uploadData(vertexArray, indexArray);
 
         // Log des statistiques
         long endTime = System.nanoTime();
         double duration = (endTime - startTime) / 1_000_000.0;
 
-        logger.info("Chunk ({}, {}) meshed: {} triangles, {:.2f}ms",
+        logger.info("Chunk ({}, {}) meshed: {} vertices, {} triangles, {:.2f}ms",
                 chunk.getChunkX(), chunk.getChunkZ(),
-                mesh.getTriangleCount(), duration);
+                mesh.getVertexCount(), mesh.getTriangleCount(), duration);
 
         return mesh;
     }
 
-    // ==================== Utilitaires ====================
+    /**
+     * Régénère le mesh d'un chunk si nécessaire.
+     * <p>
+     * Vérifie d'abord si le chunk a besoin d'une reconstruction.
+     * Si oui, génère le mesh et le définit sur le chunk.
+     * </p>
+     *
+     * @param chunk le chunk à vérifier/régénérer
+     * @return true si le mesh a été régénéré, false sinon
+     */
+    public boolean regenerateIfNeeded(Chunk chunk) {
+        if (chunk.needsMeshRebuild()) {
+            Mesh mesh = generateMesh(chunk);
+            chunk.setMesh(mesh);
+            return true;
+        }
+        return false;
+    }
 
     /**
-     * Crée un mesh vide (pas de vertices).
+     * Régénère les mesh de plusieurs chunks en batch.
      * <p>
-     * Utilisé pour les chunks entièrement vides (tous blocs d'air).
+     * Pratique pour régénérer tous les chunks modifiés en une fois.
+     * Limite optionnelle pour éviter de bloquer trop longtemps.
      * </p>
+     *
+     * @param chunks   les chunks à traiter
+     * @param maxCount nombre maximum de mesh à générer (0 = illimité)
+     * @return le nombre de mesh régénérés
      */
-    private Mesh createEmptyMesh() {
-        Mesh mesh = new Mesh();
-        mesh.uploadData(new float[0], new int[0]);
-        return mesh;
+    public int regenerateAll(Iterable<Chunk> chunks, int maxCount) {
+        int count = 0;
+        for (Chunk chunk : chunks) {
+            if (maxCount > 0 && count >= maxCount) {
+                break;
+            }
+            if (regenerateIfNeeded(chunk)) {
+                count++;
+            }
+        }
+
+        if (count > 0) {
+            logger.debug("Regenerated {} chunk meshes", count);
+        }
+
+        return count;
+    }
+
+    /**
+     * Régénère tous les mesh sans limite.
+     *
+     * @param chunks les chunks à traiter
+     * @return le nombre de mesh régénérés
+     */
+    public int regenerateAll(Iterable<Chunk> chunks) {
+        return regenerateAll(chunks, 0);
     }
 }

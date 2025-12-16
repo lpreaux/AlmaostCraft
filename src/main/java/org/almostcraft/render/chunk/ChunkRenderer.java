@@ -1,7 +1,7 @@
 package org.almostcraft.render.chunk;
 
 import org.almostcraft.camera.Camera;
-import org.almostcraft.render.chunk.frustum.Frustum;
+import org.almostcraft.graphics.culling.CullingManager;
 import org.almostcraft.render.core.Mesh;
 import org.almostcraft.render.core.Shader;
 import org.almostcraft.render.texture.TextureArray;
@@ -10,6 +10,7 @@ import org.almostcraft.world.World;
 import org.almostcraft.world.block.BlockRegistry;
 import org.almostcraft.world.chunk.Chunk;
 import org.joml.Matrix4f;
+import org.joml.Vector3f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,7 +25,7 @@ import static org.lwjgl.opengl.GL13.GL_TEXTURE0;
  * <ul>
  *   <li>Génération progressive des meshes (pour éviter les freeze)</li>
  *   <li>Cache de meshes avec système de dirty chunks</li>
- *   <li>Frustum culling pour éliminer les chunks hors écran</li>
+ *   <li>Culling délégué au {@link CullingManager}</li>
  *   <li>Nettoyage automatique des chunks déchargés</li>
  * </ul>
  * </p>
@@ -32,24 +33,23 @@ import static org.lwjgl.opengl.GL13.GL_TEXTURE0;
  * <strong>Architecture :</strong><br>
  * Le renderer ne gère QUE le rendu et les optimisations visuelles.
  * Le chargement/déchargement logique des chunks est géré par le World/ChunkLoader.
- * Cette séparation permet d'avoir des chunks actifs (simulation) même s'ils ne
- * sont pas rendus (hors écran ou trop loin).
+ * Le culling (frustum, distance) est délégué au CullingManager.
  * </p>
  * <p>
  * <strong>Utilisation :</strong>
  * <pre>
- * ChunkRenderer renderer = new ChunkRenderer(world, blockRegistry, shader, textureArray);
+ * ChunkRenderer renderer = new ChunkRenderer(world, blockRegistry, shader, textureArray, renderDistance);
  *
  * // Boucle de jeu
- * renderer.update();          // Génère les meshes progressivement
- * renderer.render(camera);    // Rend les chunks visibles
+ * renderer.update();                          // Génère les meshes progressivement
+ * renderer.render(camera, playerPosition);    // Rend les chunks visibles
  * </pre>
  * </p>
  *
  * @author Lucas Préaux
- * @version 3.1 (avec frustum culling)
- * @see ChunkMesh
- * @see Frustum
+ * @version 4.0 (refactorisé avec CullingManager)
+ * @see ChunkMeshGenerator
+ * @see CullingManager
  */
 public class ChunkRenderer {
 
@@ -80,17 +80,14 @@ public class ChunkRenderer {
     /** Texture array contenant toutes les textures de blocs */
     private final TextureArray textureArray;
 
-    /** Frustum pour le culling des chunks hors écran */
-    private final Frustum frustum;
+    /** Générateur de mesh réutilisable pour tous les chunks */
+    private final ChunkMeshGenerator meshGenerator;
 
-    /** Cache associant coordonnées de chunk → mesh OpenGL */
-    private final Map<ChunkCoordinate, Mesh> meshCache;
+    /** Gestionnaire centralisé du culling (frustum + distance) */
+    private final CullingManager cullingManager;
 
     /** Ensemble des chunks nécessitant une régénération de mesh */
     private final Set<ChunkCoordinate> dirtyChunks;
-
-    /** Matrice view-projection réutilisée pour éviter les allocations */
-    private final Matrix4f viewProjection;
 
     /** Statistique : nombre total de meshes générés depuis le démarrage */
     private int totalMeshesGenerated;
@@ -108,9 +105,11 @@ public class ChunkRenderer {
      * @param blockRegistry le registre des blocs (non null)
      * @param shader le shader de rendu (non null)
      * @param textureArray la texture array des blocs (non null)
-     * @throws IllegalArgumentException si un paramètre est null
+     * @param renderDistance distance de rendu en chunks (ex: 8 = 128 blocs)
+     * @throws IllegalArgumentException si un paramètre est null ou invalide
      */
-    public ChunkRenderer(World world, BlockRegistry blockRegistry, Shader shader, TextureArray textureArray) {
+    public ChunkRenderer(World world, BlockRegistry blockRegistry, Shader shader,
+                         TextureArray textureArray, int renderDistance) {
         if (world == null) {
             throw new IllegalArgumentException("World cannot be null");
         }
@@ -123,18 +122,21 @@ public class ChunkRenderer {
         if (textureArray == null) {
             throw new IllegalArgumentException("TextureArray cannot be null");
         }
+        if (renderDistance <= 0) {
+            throw new IllegalArgumentException("Render distance must be positive");
+        }
 
         this.world = world;
         this.blockRegistry = blockRegistry;
         this.shader = shader;
         this.textureArray = textureArray;
-        this.frustum = new Frustum();
-        this.meshCache = new HashMap<>();
+        this.meshGenerator = new ChunkMeshGenerator(world, blockRegistry, textureArray);
+        this.cullingManager = new CullingManager(renderDistance);
         this.dirtyChunks = new HashSet<>();
-        this.viewProjection = new Matrix4f();
         this.totalMeshesGenerated = 0;
 
-        logger.info("ChunkRenderer initialized with frustum culling");
+        logger.info("ChunkRenderer initialized with render distance: {} chunks ({} blocks)",
+                renderDistance, renderDistance * 16);
     }
 
     // ==================== Mise à jour ====================
@@ -188,19 +190,10 @@ public class ChunkRenderer {
 
             logger.debug("Generating mesh for chunk ({}, {})", coord.x(), coord.z());
 
-            // Nettoyer l'ancien mesh s'il existe
-            Mesh oldMesh = meshCache.get(coord);
-            if (oldMesh != null) {
-                oldMesh.cleanup();
-            }
+            // Générer le nouveau mesh via le generator
+            Mesh mesh = meshGenerator.generateMesh(chunk);
+            chunk.setMesh(mesh);
 
-            // Générer le nouveau mesh
-            ChunkMesh chunkMeshBuilder = new ChunkMesh(
-                    chunk, world, blockRegistry, textureArray
-            );
-            Mesh mesh = chunkMeshBuilder.build();
-
-            meshCache.put(coord, mesh);
             totalMeshesGenerated++;
             generated++;
 
@@ -216,50 +209,31 @@ public class ChunkRenderer {
     /**
      * Nettoie les meshes des chunks qui ont été déchargés du monde.
      * <p>
-     * Cette méthode parcourt le cache de meshes et supprime ceux dont
-     * les chunks ne sont plus chargés dans le monde.
+     * Les meshes sont maintenant stockés directement dans les chunks,
+     * donc on les nettoie via chunk.destroyMesh().
      * </p>
      */
     private void cleanupUnloadedChunks() {
-        Set<ChunkCoordinate> toRemove = new HashSet<>();
-
-        // Identifier les meshes à supprimer
-        for (ChunkCoordinate coord : meshCache.keySet()) {
-            if (!world.hasChunk(coord.x(), coord.z())) {
-                toRemove.add(coord);
-            }
-        }
-
-        // Supprimer et nettoyer les meshes
-        for (ChunkCoordinate coord : toRemove) {
-            Mesh mesh = meshCache.remove(coord);
-            if (mesh != null) {
-                mesh.cleanup();
-                logger.debug("Cleaned up mesh for unloaded chunk ({}, {})", coord.x(), coord.z());
-            }
-        }
-
-        if (!toRemove.isEmpty()) {
-            logger.debug("Removed {} meshes for unloaded chunks", toRemove.size());
-        }
+        // Note: Le nettoyage des mesh est maintenant géré par le World
+        // quand il décharge un chunk (via chunk.cleanup())
+        // Cette méthode est conservée pour compatibilité future
     }
 
     /**
      * Détecte les chunks modifiés et les marque pour régénération.
      * <p>
-     * Parcourt tous les chunks chargés et vérifie leur flag isModified().
-     * Les chunks modifiés sont ajoutés à la file de régénération.
+     * Parcourt tous les chunks chargés et vérifie leur flag needsMeshRebuild().
+     * Les chunks nécessitant un rebuild sont ajoutés à la file de régénération.
      * </p>
      */
     private void detectModifiedChunks() {
         for (Chunk chunk : world.getLoadedChunks()) {
-            if (chunk.isModified()) {
+            if (chunk.needsMeshRebuild()) {
                 ChunkCoordinate coord = new ChunkCoordinate(
                         chunk.getChunkX(),
                         chunk.getChunkZ()
                 );
                 dirtyChunks.add(coord);
-                chunk.clearModified();
             }
         }
     }
@@ -271,13 +245,13 @@ public class ChunkRenderer {
      * <p>
      * <strong>Pipeline de rendu :</strong>
      * <ol>
+     *   <li>Met à jour le CullingManager avec la caméra</li>
+     *   <li>Obtient la liste des chunks visibles (après culling)</li>
      *   <li>Active le shader et les textures</li>
-     *   <li>Calcule le frustum depuis la caméra</li>
-     *   <li>Pour chaque chunk chargé :
+     *   <li>Pour chaque chunk visible :
      *     <ul>
-     *       <li>Teste la visibilité (frustum culling)</li>
-     *       <li>Récupère ou génère le mesh si nécessaire</li>
-     *       <li>Calcule la matrice MVP et rend le chunk</li>
+     *       <li>Calcule la matrice MVP</li>
+     *       <li>Rend le chunk si son mesh existe</li>
      *     </ul>
      *   </li>
      *   <li>Désactive le shader</li>
@@ -286,52 +260,41 @@ public class ChunkRenderer {
      * <p>
      * <strong>Optimisations appliquées :</strong>
      * <ul>
+     *   <li>Distance culling : élimine les chunks trop loin</li>
      *   <li>Frustum culling : élimine 50-80% des chunks selon l'orientation</li>
-     *   <li>Cache de meshes : évite la régénération inutile</li>
-     *   <li>Early-exit pour chunks vides ou non générés</li>
+     *   <li>Empty chunk culling : skip les chunks vides</li>
+     *   <li>Mesh existence check : skip les chunks sans mesh généré</li>
      * </ul>
      * </p>
      *
      * @param camera la caméra définissant le point de vue (non null)
+     * @param playerPosition position du joueur pour le culling de distance (non null)
      */
-    public void render(Camera camera) {
-        // Setup du rendu
+    public void render(Camera camera, Vector3f playerPosition) {
+        // 1. Mettre à jour le culling manager
+        cullingManager.update(camera, playerPosition);
+
+        // 2. Obtenir les chunks visibles (après distance + frustum culling)
+        Collection<Chunk> loadedChunks = world.getLoadedChunks();
+        List<Chunk> visibleChunks = cullingManager.cullChunks(loadedChunks);
+
+        // 3. Setup du rendu
         shader.bind();
         textureArray.bind(GL_TEXTURE0);
         shader.setUniform("uTextureArray", 0);
 
-        // Mise à jour du frustum pour le culling
-        viewProjection.set(camera.getProjectionMatrix())
-                .mul(camera.getViewMatrix());
-        frustum.updateFrustum(viewProjection);
+        // 4. Tracker les stats de rendu
+        long renderStart = System.nanoTime();
+        int rendered = 0;
 
-        // Rendu de chaque chunk visible
-        for (Chunk chunk : world.getLoadedChunks()) {
-            // Frustum culling : skip les chunks hors écran
-            if (!frustum.isChunkVisible(
-                    chunk.getChunkX(),
-                    chunk.getChunkZ(),
-                    chunk.WIDTH,
-                    chunk.HEIGHT,
-                    chunk.DEPTH,
-                    0
-            )) {
+        // 5. Rendu de chaque chunk visible
+        for (Chunk chunk : visibleChunks) {
+            // Skip si pas de mesh
+            if (!chunk.hasMesh()) {
                 continue;
             }
 
-            ChunkCoordinate coord = new ChunkCoordinate(
-                    chunk.getChunkX(),
-                    chunk.getChunkZ()
-            );
-
-            // Récupérer ou générer le mesh
-            Mesh mesh = getOrCreateMesh(coord, chunk);
-
-            if (mesh == null) {
-                continue;
-            }
-
-            // Calculer la matrice MVP et rendre
+            // Calculer la matrice MVP
             Matrix4f modelMatrix = new Matrix4f().identity();
             Matrix4f mvp = new Matrix4f(camera.getProjectionMatrix())
                     .mul(camera.getViewMatrix())
@@ -339,61 +302,46 @@ public class ChunkRenderer {
 
             shader.setUniform("uMVP", mvp);
 
-            mesh.render();
+            // Rendre le chunk
+            chunk.getMesh().render();
+            rendered++;
         }
 
         shader.unbind();
+
+        // 6. Mettre à jour les stats de rendu
+        long renderEnd = System.nanoTime();
+        cullingManager.getStats().addRenderTime(renderEnd - renderStart);
+
+        // 7. Log périodique des stats (toutes les 60 frames)
+        if (totalMeshesGenerated % 60 == 0) {
+            logger.trace("Render stats: {}", cullingManager.getStats().getCompactSummary());
+        }
+    }
+
+    // ==================== Configuration ====================
+
+    /**
+     * Change la distance de rendu.
+     * <p>
+     * Une distance plus grande permet de voir plus loin mais réduit les performances.
+     * </p>
+     *
+     * @param renderDistance nouvelle distance en chunks (doit être positive)
+     */
+    public void setRenderDistance(int renderDistance) {
+        cullingManager.setRenderDistance(renderDistance);
+        logger.info("Render distance changed to {} chunks ({} blocks)",
+                renderDistance, renderDistance * 16);
     }
 
     /**
-     * Récupère un mesh depuis le cache ou le génère si nécessaire.
-     * <p>
-     * Cette méthode gère également la régénération des meshes marqués
-     * comme dirty (modifiés).
-     * </p>
+     * Obtient la distance de rendu actuelle.
      *
-     * @param coord les coordonnées du chunk
-     * @param chunk le chunk à rendre
-     * @return le mesh du chunk, ou null si le chunk n'est pas prêt/vide
+     * @return distance de rendu en chunks
      */
-    private Mesh getOrCreateMesh(ChunkCoordinate coord, Chunk chunk) {
-        // Chunk pas encore généré
-        if (!chunk.isGenerated()) {
-            return null;
-        }
-
-        // Régénérer si le chunk est dirty
-        if (dirtyChunks.contains(coord)) {
-            Mesh oldMesh = meshCache.remove(coord);
-            if (oldMesh != null) {
-                oldMesh.cleanup();
-            }
-            dirtyChunks.remove(coord);
-        }
-
-        // Vérifier le cache
-        Mesh mesh = meshCache.get(coord);
-        if (mesh != null) {
-            return mesh;
-        }
-
-        // Chunk vide : pas besoin de mesh
-        if (chunk.isEmpty()) {
-            return null;
-        }
-
-        // Générer le mesh
-        logger.debug("Generating mesh for chunk ({}, {})", coord.x(), coord.z());
-
-        ChunkMesh chunkMeshBuilder = new ChunkMesh(
-                chunk, world, blockRegistry, textureArray
-        );
-        mesh = chunkMeshBuilder.build();
-
-        meshCache.put(coord, mesh);
-        totalMeshesGenerated++;
-
-        return mesh;
+    public int getRenderDistance() {
+        return cullingManager.getRenderDistance();
     }
 
     // ==================== Utilitaires ====================
@@ -410,6 +358,12 @@ public class ChunkRenderer {
      */
     public void markChunkDirty(int chunkX, int chunkZ) {
         dirtyChunks.add(new ChunkCoordinate(chunkX, chunkZ));
+
+        // Marquer aussi le chunk lui-même si il existe
+        if (world.hasChunk(chunkX, chunkZ)) {
+            world.getChunk(chunkX, chunkZ).markMeshDirty();
+        }
+
         logger.trace("Chunk ({}, {}) marked dirty", chunkX, chunkZ);
     }
 
@@ -423,13 +377,13 @@ public class ChunkRenderer {
      * @param chunkZ coordonnée Z du chunk
      */
     public void regenerateChunk(int chunkX, int chunkZ) {
-        ChunkCoordinate coord = new ChunkCoordinate(chunkX, chunkZ);
-
-        Mesh oldMesh = meshCache.remove(coord);
-        if (oldMesh != null) {
-            oldMesh.cleanup();
+        if (world.hasChunk(chunkX, chunkZ)) {
+            Chunk chunk = world.getChunk(chunkX, chunkZ);
+            chunk.destroyMesh();
+            chunk.markMeshDirty();
         }
 
+        ChunkCoordinate coord = new ChunkCoordinate(chunkX, chunkZ);
         dirtyChunks.add(coord);
 
         logger.debug("Forced regeneration of chunk ({}, {})", chunkX, chunkZ);
@@ -446,40 +400,48 @@ public class ChunkRenderer {
      * @param chunkZ coordonnée Z du chunk chargé
      */
     public void onChunkLoaded(int chunkX, int chunkZ) {
+        markChunkDirty(chunkX, chunkZ);
         markChunkDirty(chunkX - 1, chunkZ);
         markChunkDirty(chunkX + 1, chunkZ);
         markChunkDirty(chunkX, chunkZ - 1);
         markChunkDirty(chunkX, chunkZ + 1);
 
-        logger.info("Marked neighbors of chunk ({}, {}) as dirty", chunkX, chunkZ);
+        logger.debug("Marked chunk ({}, {}) and neighbors as dirty", chunkX, chunkZ);
     }
 
     // ==================== Nettoyage ====================
 
     /**
-     * Libère toutes les ressources OpenGL du renderer.
+     * Libère toutes les ressources du renderer.
      * <p>
      * <strong>IMPORTANT :</strong> Cette méthode DOIT être appelée avant
-     * la fermeture de l'application pour éviter les fuites mémoire GPU.
+     * la fermeture de l'application pour éviter les fuites mémoire.
      * </p>
      */
     public void cleanup() {
-        for (Mesh mesh : meshCache.values()) {
-            mesh.cleanup();
-        }
-        meshCache.clear();
-        logger.info("ChunkRenderer cleaned up ({} meshes freed)", meshCache.size());
+        // Les meshes sont maintenant stockés dans les chunks
+        // Ils seront nettoyés quand le World sera nettoyé
+        logger.info("ChunkRenderer cleaned up");
     }
 
     // ==================== Getters (statistiques) ====================
 
     /**
-     * Retourne le nombre de meshes actuellement en cache.
+     * Retourne les statistiques de culling du dernier frame.
      *
-     * @return nombre de meshes cachés
+     * @return statistiques détaillées du culling
      */
-    public int getCachedMeshCount() {
-        return meshCache.size();
+    public String getCullingStats() {
+        return cullingManager.getStats().getCompactSummary();
+    }
+
+    /**
+     * Retourne les statistiques de culling détaillées.
+     *
+     * @return statistiques complètes avec analyse
+     */
+    public String getDetailedCullingStats() {
+        return cullingManager.getStats().getDetailedSummary();
     }
 
     /**
@@ -504,17 +466,30 @@ public class ChunkRenderer {
     }
 
     /**
-     * Calcule le nombre total de triangles rendus.
+     * Calcule le nombre total de triangles actuellement rendus.
      * <p>
-     * Somme tous les triangles de tous les meshes en cache.
+     * Somme tous les triangles de tous les chunks visibles du dernier frame.
      * Utile pour mesurer la charge GPU.
      * </p>
      *
-     * @return nombre total de triangles
+     * @return nombre total de triangles rendus
      */
-    public int getTotalTriangleCount() {
-        return meshCache.values().stream()
-                .mapToInt(Mesh::getTriangleCount)
-                .sum();
+    public int getRenderedTriangleCount() {
+        int total = 0;
+        for (Chunk chunk : world.getLoadedChunks()) {
+            if (chunk.hasMesh()) {
+                total += chunk.getMesh().getTriangleCount();
+            }
+        }
+        return total;
+    }
+
+    /**
+     * Retourne le gestionnaire de culling pour accès direct si nécessaire.
+     *
+     * @return le CullingManager
+     */
+    public CullingManager getCullingManager() {
+        return cullingManager;
     }
 }

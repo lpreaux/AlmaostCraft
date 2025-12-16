@@ -54,7 +54,7 @@ public class Engine {
     private static final int DEFAULT_WINDOW_HEIGHT = 720;
     private static final String WINDOW_TITLE = "AlmostCraft";
     private static final String CONFIG_FILE = "/application.properties";
-    private static final int DEFAULT_RENDER_DISTANCE = 8;
+    private static final int DEFAULT_RENDER_DISTANCE = 16;
 
     // ==================== Core Components ====================
 

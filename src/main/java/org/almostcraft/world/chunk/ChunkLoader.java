@@ -11,8 +11,14 @@ import java.util.*;
 /**
  * Gestionnaire de chargement et déchargement des chunks autour du joueur.
  * <p>
- * Ce système maintient une "bulle" de chunks chargés autour de la position du joueur
+ * Ce système maintient une "bulle" de chunks chargés en mémoire autour de la position du joueur
  * et décharge les chunks trop éloignés pour optimiser la mémoire.
+ * </p>
+ * <p>
+ * <strong>Important : Simulation vs Render Distance</strong><br>
+ * - <b>Simulation Distance</b> : Distance à laquelle les chunks sont chargés en mémoire (géré par cette classe)<br>
+ * - <b>Render Distance</b> : Distance à laquelle les chunks sont affichés à l'écran (géré par ChunkRenderer)<br>
+ * La simulation distance doit être ≥ render distance pour éviter les "trous" visuels.
  * </p>
  * <p>
  * Le chargement/déchargement est progressif (limité par frame) pour éviter
@@ -29,21 +35,21 @@ public class ChunkLoader {
     // ==================== Constantes ====================
 
     /**
-     * Distance de rendu par défaut en chunks (rayon).
+     * Distance de simulation par défaut en chunks (rayon).
      * <p>
-     * Une distance de 8 signifie un carré de 17×17 chunks (289 chunks).
+     * Une distance de 8 signifie un carré de 17×17 chunks (289 chunks chargés en mémoire).
      * </p>
      */
-    private static final int DEFAULT_RENDER_DISTANCE = 8;
+    private static final int DEFAULT_SIMULATION_DISTANCE = 8;
 
     /**
-     * Distance de déchargement par défaut (render distance + buffer).
+     * Distance de déchargement par défaut (simulation distance + buffer).
      * <p>
      * Le buffer évite les cycles charge/décharge constants quand le joueur
-     * se déplace à la limite de la render distance.
+     * se déplace à la limite de la simulation distance.
      * </p>
      */
-    private static final int DEFAULT_UNLOAD_DISTANCE_BUFFER = 2;
+    private static final int DEFAULT_SIMULATION_UNLOAD_BUFFER = 2;
 
     /**
      * Nombre maximum de chunks à charger par frame.
@@ -71,14 +77,21 @@ public class ChunkLoader {
     private final ChunkRenderer chunkRenderer;
 
     /**
-     * Distance de rendu en chunks (rayon autour du joueur).
+     * Distance de simulation en chunks (rayon autour du joueur).
+     * <p>
+     * Détermine quels chunks sont chargés en mémoire.
+     * </p>
      */
-    private int renderDistance;
+    private int simulationDistance;
 
     /**
      * Distance de déchargement en chunks.
+     * <p>
+     * Les chunks au-delà de cette distance sont déchargés de la mémoire.
+     * Doit être > simulationDistance pour éviter les cycles.
+     * </p>
      */
-    private int unloadDistance;
+    private int simulationUnloadDistance;
 
     /**
      * Position du chunk où se trouve actuellement le joueur.
@@ -113,42 +126,44 @@ public class ChunkLoader {
     // ==================== Constructeur ====================
 
     /**
-     * Crée un nouveau gestionnaire de chunks avec distance par défaut.
+     * Crée un nouveau gestionnaire de chunks avec distance de simulation par défaut.
      *
      * @param world le monde à gérer
+     * @param chunkRenderer le renderer de chunks (peut être null)
      */
     public ChunkLoader(World world, ChunkRenderer chunkRenderer) {
-        this(world, DEFAULT_RENDER_DISTANCE, chunkRenderer);
+        this(world, DEFAULT_SIMULATION_DISTANCE, chunkRenderer);
     }
 
     /**
-     * Crée un nouveau gestionnaire de chunks avec distance personnalisée.
+     * Crée un nouveau gestionnaire de chunks avec distance de simulation personnalisée.
      *
-     * @param world          le monde à gérer
-     * @param renderDistance la distance de rendu en chunks
-     * @throws IllegalArgumentException si world est null ou renderDistance invalide
+     * @param world              le monde à gérer
+     * @param simulationDistance la distance de simulation en chunks
+     * @param chunkRenderer      le renderer de chunks (peut être null)
+     * @throws IllegalArgumentException si world est null ou simulationDistance invalide
      */
-    public ChunkLoader(World world, int renderDistance, ChunkRenderer chunkRenderer) {
+    public ChunkLoader(World world, int simulationDistance, ChunkRenderer chunkRenderer) {
         if (world == null) {
             throw new IllegalArgumentException("World cannot be null");
         }
-        if (renderDistance < 1 || renderDistance > 32) {
+        if (simulationDistance < 1 || simulationDistance > 32) {
             throw new IllegalArgumentException(
-                    String.format("Render distance must be between 1 and 32, got: %d", renderDistance)
+                    String.format("Simulation distance must be between 1 and 32, got: %d", simulationDistance)
             );
         }
 
         this.world = world;
-        this.renderDistance = renderDistance;
-        this.unloadDistance = renderDistance + DEFAULT_UNLOAD_DISTANCE_BUFFER;
+        this.simulationDistance = simulationDistance;
+        this.simulationUnloadDistance = simulationDistance + DEFAULT_SIMULATION_UNLOAD_BUFFER;
         this.targetChunks = new HashSet<>();
         this.loadQueue = new LinkedList<>();
         this.unloadQueue = new LinkedList<>();
         this.lastPlayerChunk = null;
         this.chunkRenderer = chunkRenderer;
 
-        logger.info("ChunkLoader created: renderDistance={}, unloadDistance={}",
-                renderDistance, unloadDistance);
+        logger.info("ChunkLoader created: simulationDistance={}, simulationUnloadDistance={}",
+                simulationDistance, simulationUnloadDistance);
     }
 
     // ==================== Méthode principale : update ====================
@@ -213,7 +228,7 @@ public class ChunkLoader {
     /**
      * Calcule l'ensemble des chunks qui devraient être chargés autour du joueur.
      * <p>
-     * Génère un carré de chunks de taille (2*renderDistance + 1)².
+     * Génère un carré de chunks de taille (2*simulationDistance + 1)².
      * </p>
      *
      * @param center le chunk central (position du joueur)
@@ -222,8 +237,8 @@ public class ChunkLoader {
     private Set<ChunkCoordinate> calculateTargetChunks(ChunkCoordinate center) {
         Set<ChunkCoordinate> targets = new HashSet<>();
 
-        for (int dx = -renderDistance; dx <= renderDistance; dx++) {
-            for (int dz = -renderDistance; dz <= renderDistance; dz++) {
+        for (int dx = -simulationDistance; dx <= simulationDistance; dx++) {
+            for (int dz = -simulationDistance; dz <= simulationDistance; dz++) {
                 targets.add(new ChunkCoordinate(center.x() + dx, center.z() + dz));
             }
         }
@@ -306,7 +321,7 @@ public class ChunkLoader {
      * Met à jour la file des chunks à décharger.
      * <p>
      * Ajoute les chunks actuellement chargés qui ne sont plus dans
-     * la zone de render (targetChunks).
+     * la zone de simulation (targetChunks).
      * </p>
      *
      * @param playerChunk position du chunk du joueur
@@ -410,31 +425,31 @@ public class ChunkLoader {
     // ==================== Getters / Setters ====================
 
     /**
-     * Retourne la distance de rendu actuelle.
+     * Retourne la distance de simulation actuelle.
      *
-     * @return la render distance en chunks
+     * @return la simulation distance en chunks
      */
-    public int getRenderDistance() {
-        return renderDistance;
+    public int getSimulationDistance() {
+        return simulationDistance;
     }
 
     /**
-     * Définit une nouvelle distance de rendu.
+     * Définit une nouvelle distance de simulation.
      * <p>
      * Force une mise à jour immédiate du chargement des chunks.
      * </p>
      *
-     * @param renderDistance la nouvelle distance (1-32)
+     * @param simulationDistance la nouvelle distance (1-32)
      */
-    public void setRenderDistance(int renderDistance) {
-        if (renderDistance < 1 || renderDistance > 32) {
-            throw new IllegalArgumentException("Render distance must be between 1 and 32");
+    public void setSimulationDistance(int simulationDistance) {
+        if (simulationDistance < 1 || simulationDistance > 32) {
+            throw new IllegalArgumentException("Simulation distance must be between 1 and 32");
         }
 
-        if (this.renderDistance != renderDistance) {
-            logger.info("Render distance changed: {} -> {}", this.renderDistance, renderDistance);
-            this.renderDistance = renderDistance;
-            this.unloadDistance = renderDistance + DEFAULT_UNLOAD_DISTANCE_BUFFER;
+        if (this.simulationDistance != simulationDistance) {
+            logger.info("Simulation distance changed: {} -> {}", this.simulationDistance, simulationDistance);
+            this.simulationDistance = simulationDistance;
+            this.simulationUnloadDistance = simulationDistance + DEFAULT_SIMULATION_UNLOAD_BUFFER;
 
             // Forcer une mise à jour si le joueur est déjà positionné
             if (lastPlayerChunk != null) {

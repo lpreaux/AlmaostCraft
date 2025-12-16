@@ -11,7 +11,7 @@ import org.joml.Vector3f;
  * </p>
  *
  * @author Lucas Préaux
- * @version 1.0
+ * @version 1.1
  */
 public class Camera {
 
@@ -56,6 +56,17 @@ public class Camera {
      */
     private final Matrix4f projectionMatrix;
 
+    /**
+     * Matrice view-projection combinée (cache).
+     * Calculée à partir de projection × view.
+     */
+    private final Matrix4f viewProjectionMatrix;
+
+    /**
+     * Flag indiquant si la matrice VP doit être recalculée.
+     */
+    private boolean viewProjectionDirty;
+
     // ==================== Constructeur ====================
 
     /**
@@ -72,6 +83,8 @@ public class Camera {
 
         this.viewMatrix = new Matrix4f();
         this.projectionMatrix = new Matrix4f();
+        this.viewProjectionMatrix = new Matrix4f();
+        this.viewProjectionDirty = true;
     }
 
     /**
@@ -87,6 +100,7 @@ public class Camera {
      * Met à jour la matrice de vue en fonction de la position et orientation actuelles.
      * <p>
      * Doit être appelé après chaque modification de position/orientation.
+     * Marque la matrice view-projection comme nécessitant une mise à jour.
      * </p>
      */
     public void updateViewMatrix() {
@@ -94,12 +108,16 @@ public class Camera {
                 .rotateX((float) Math.toRadians(pitch))
                 .rotateY((float) Math.toRadians(yaw))
                 .translate(-position.x, -position.y, -position.z);
+
+        // Marquer la VP comme obsolète
+        viewProjectionDirty = true;
     }
 
     /**
      * Met à jour la matrice de projection.
      * <p>
      * À appeler au démarrage et lors du redimensionnement de la fenêtre.
+     * Marque la matrice view-projection comme nécessitant une mise à jour.
      * </p>
      *
      * @param fov         le champ de vision vertical (en degrés, typiquement 70-90)
@@ -110,6 +128,24 @@ public class Camera {
     public void updateProjectionMatrix(float fov, float aspectRatio, float near, float far) {
         projectionMatrix.identity()
                 .perspective((float) Math.toRadians(fov), aspectRatio, near, far);
+
+        // Marquer la VP comme obsolète
+        viewProjectionDirty = true;
+    }
+
+    /**
+     * Met à jour la matrice view-projection si nécessaire.
+     * <p>
+     * Cette méthode est appelée automatiquement par {@link #getViewProjectionMatrix()}.
+     * Elle ne recalcule la matrice que si elle a été invalidée.
+     * </p>
+     */
+    private void updateViewProjectionMatrix() {
+        if (viewProjectionDirty) {
+            // VP = Projection × View (ordre important !)
+            projectionMatrix.mul(viewMatrix, viewProjectionMatrix);
+            viewProjectionDirty = false;
+        }
     }
 
     // ==================== Mouvement ====================
@@ -181,6 +217,24 @@ public class Camera {
      */
     public Matrix4f getProjectionMatrix() {
         return projectionMatrix;
+    }
+
+    /**
+     * Retourne la matrice view-projection combinée.
+     * <p>
+     * Cette matrice est le produit de la projection et de la vue (Projection × View).
+     * Elle est utilisée pour le frustum culling et d'autres calculs d'espace écran.
+     * </p>
+     * <p>
+     * <strong>Optimisation :</strong> La matrice est mise en cache et n'est recalculée
+     * que lorsque la vue ou la projection change.
+     * </p>
+     *
+     * @return la matrice view-projection (world → clip)
+     */
+    public Matrix4f getViewProjectionMatrix() {
+        updateViewProjectionMatrix();
+        return viewProjectionMatrix;
     }
 
     /**
