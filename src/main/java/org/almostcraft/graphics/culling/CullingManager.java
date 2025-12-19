@@ -24,6 +24,7 @@ public class CullingManager {
 
     // Culling components
     private final Frustum frustum;
+    private final ChunkOcclusionCuller occlusionCuller;
     private final CullingStats stats;
 
     // Cached values (updated each frame)
@@ -40,6 +41,7 @@ public class CullingManager {
         this.renderDistanceSquared = calculateRenderDistanceSquared();
 
         this.frustum = new Frustum();
+        this.occlusionCuller = new ChunkOcclusionCuller();
         this.stats = new CullingStats();
 
         this.cameraPosition = new Vector3f();
@@ -82,7 +84,7 @@ public class CullingManager {
 
     /**
      * Culls the provided chunks and returns only those that should be rendered.
-     * Applies distance culling, frustum culling, and updates statistics.
+     * Applies distance culling, frustum culling, occlusion culling, and updates statistics.
      *
      * @param chunks Collection of chunks to cull
      * @return List of chunks that passed all culling tests
@@ -91,7 +93,9 @@ public class CullingManager {
         long startTime = System.nanoTime();
 
         List<Chunk> visibleChunks = new ArrayList<>();
+        List<Chunk> frustumPassedChunks = new ArrayList<>();
 
+        // Phase 1: Distance and Frustum culling
         for (Chunk chunk : chunks) {
             stats.incrementTotalLoaded();
 
@@ -119,6 +123,21 @@ public class CullingManager {
                 continue;
             }
 
+            // Chunk passed frustum culling
+            frustumPassedChunks.add(chunk);
+        }
+
+        // Phase 2: Occlusion culling
+        // Update occluder list with chunks that passed frustum culling
+        occlusionCuller.update(cameraPosition, frustumPassedChunks);
+
+        for (Chunk chunk : frustumPassedChunks) {
+            // Occlusion culling
+            if (occlusionCuller.isOccluded(chunk)) {
+                stats.incrementOcclusionCulled();
+                continue;
+            }
+
             // Chunk is visible
             stats.incrementRendered();
             visibleChunks.add(chunk);
@@ -127,7 +146,8 @@ public class CullingManager {
         long endTime = System.nanoTime();
         stats.addCullingTime(endTime - startTime);
 
-        logger.trace("Culled {} chunks -> {} visible", chunks.size(), visibleChunks.size());
+        logger.trace("Culled {} chunks -> {} visible (occluders: {})",
+                chunks.size(), visibleChunks.size(), occlusionCuller.getOccluderCount());
 
         return visibleChunks;
     }
@@ -232,6 +252,33 @@ public class CullingManager {
         return frustum;
     }
 
+    /**
+     * Gets the occlusion culler for configuration.
+     *
+     * @return Occlusion culler instance
+     */
+    public ChunkOcclusionCuller getOcclusionCuller() {
+        return occlusionCuller;
+    }
+
+    /**
+     * Enables or disables occlusion culling.
+     *
+     * @param enabled true to enable occlusion culling
+     */
+    public void setOcclusionCullingEnabled(boolean enabled) {
+        occlusionCuller.setEnabled(enabled);
+    }
+
+    /**
+     * Checks if occlusion culling is enabled.
+     *
+     * @return true if occlusion culling is active
+     */
+    public boolean isOcclusionCullingEnabled() {
+        return occlusionCuller.isEnabled();
+    }
+
     // ========== Advanced Culling Methods ==========
 
     /**
@@ -250,7 +297,13 @@ public class CullingManager {
             return false;
         }
 
-        return isChunkInFrustum(chunk);
+        if (!isChunkInFrustum(chunk)) {
+            return false;
+        }
+
+        // Note: Occlusion test requires context from other chunks
+        // For single chunk tests, we skip occlusion culling
+        return true;
     }
 
     /**
@@ -332,13 +385,14 @@ public class CullingManager {
      */
     public String getDebugInfo() {
         return String.format(
-                "CullingManager[renderDist=%d chunks (%d blocks), cameraPos=%s, playerChunk=(%d,%d,%d)]",
+                "CullingManager[renderDist=%d chunks (%d blocks), cameraPos=%s, playerChunk=(%d,%d,%d), occluders=%d]",
                 renderDistance,
                 renderDistance * 16,
                 cameraPosition,
                 (int) playerChunkPosition.x,
                 (int) playerChunkPosition.y,
-                (int) playerChunkPosition.z
+                (int) playerChunkPosition.z,
+                occlusionCuller.getOccluderCount()
         );
     }
 
